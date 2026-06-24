@@ -1,0 +1,35 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <AssemblyName>TrussModelling</AssemblyName>
+    <RootNamespace>TrussModelling</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <Reference Include="ETABSv1">
+      <HintPath>$(MSBuildThisFileDirectory)lib\ETABSv1.dll</HintPath>
+      <Private>true</Private>
+      <SpecificVersion>false</SpecificVersion>
+    </Reference>
+    <None Include="lib\ETABSv1.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="PropertyLibraries\*.xml" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="HelixToolkit.Wpf" Version="3.1.2" />
+  </ItemGroup>
+
+  <Target Name="ValidatePortableBuildPrerequisites" BeforeTargets="PrepareForBuild">
+    <Error Condition="'$(NETCoreSdkVersion)' == ''"
+           Text="The .NET SDK was not detected. Install the .NET 8 SDK or later, then restore/build this project again." />
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)lib\ETABSv1.dll')"
+           Text="Missing lib\ETABSv1.dll. Copy the full project folder, including the lib folder, before building." />
+  </Target>
+
+</Project>
