@@ -3,7 +3,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 
-namespace TrussModelling.Controls;
+namespace CSIModellingTools.Controls;
 
 public partial class SliderNumberInput : UserControl, INotifyPropertyChanged
 {

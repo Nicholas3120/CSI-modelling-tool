@@ -2,9 +2,9 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Data;
 using System.Windows.Input;
-using TrussModelling.ViewModels;
+using CSIModellingTools.ViewModels;
 
-namespace TrussModelling;
+namespace CSIModellingTools;
 
 public partial class MainWindow : Window
 {

@@ -1,6 +1,6 @@
-using TrussModelling.Models;
+using CSIModellingTools.Models;
 
-namespace TrussModelling.Services;
+namespace CSIModellingTools.Services;
 
 public sealed class PlateGirderValidator
 {

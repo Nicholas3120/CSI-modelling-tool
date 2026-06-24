@@ -4,9 +4,9 @@ using System.Globalization;
 using System.IO;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.ComTypes;
-using TrussModelling.Models;
+using CSIModellingTools.Models;
 
-namespace TrussModelling.Services;
+namespace CSIModellingTools.Services;
 
 public sealed class EtabsParametricModellingService
 {

@@ -1,10 +1,10 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Input;
-using TrussModelling.Models;
-using TrussModelling.Services;
+using CSIModellingTools.Models;
+using CSIModellingTools.Services;
 
-namespace TrussModelling.ViewModels;
+namespace CSIModellingTools.ViewModels;
 
 public sealed class SectionPropertyViewModel : ObservableObject
 {

@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
-namespace TrussModelling.Models;
+namespace CSIModellingTools.Models;
 
 public static class TieBeamDirectionEffectLabels
 {

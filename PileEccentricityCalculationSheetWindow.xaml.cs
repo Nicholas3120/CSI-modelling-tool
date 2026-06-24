@@ -1,7 +1,7 @@
 using System.Windows;
-using TrussModelling.ViewModels;
+using CSIModellingTools.ViewModels;
 
-namespace TrussModelling;
+namespace CSIModellingTools;
 
 public partial class PileEccentricityCalculationSheetWindow : Window
 {

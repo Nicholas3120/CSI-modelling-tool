@@ -1,7 +1,7 @@
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 
-namespace TrussModelling.ViewModels;
+namespace CSIModellingTools.ViewModels;
 
 public abstract class ObservableObject : INotifyPropertyChanged
 {

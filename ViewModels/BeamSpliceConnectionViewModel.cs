@@ -1,9 +1,9 @@
 using System.Collections.ObjectModel;
 using System.Runtime.CompilerServices;
-using TrussModelling.Models;
-using TrussModelling.Services;
+using CSIModellingTools.Models;
+using CSIModellingTools.Services;
 
-namespace TrussModelling.ViewModels;
+namespace CSIModellingTools.ViewModels;
 
 public sealed class BeamSpliceConnectionViewModel : ObservableObject
 {

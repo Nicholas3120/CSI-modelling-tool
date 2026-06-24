@@ -1,4 +1,4 @@
-namespace TrussModelling.Models;
+namespace CSIModellingTools.Models;
 
 public enum WallDrainShapeMode
 {

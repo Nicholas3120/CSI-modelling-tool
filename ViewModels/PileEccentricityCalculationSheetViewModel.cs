@@ -1,6 +1,6 @@
-using TrussModelling.Models;
+using CSIModellingTools.Models;
 
-namespace TrussModelling.ViewModels;
+namespace CSIModellingTools.ViewModels;
 
 public sealed class PileEccentricityCalculationSheetViewModel
 {

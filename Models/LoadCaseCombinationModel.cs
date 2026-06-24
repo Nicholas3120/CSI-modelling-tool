@@ -4,7 +4,7 @@ using System.Collections.Specialized;
 using System.Globalization;
 using System.Runtime.CompilerServices;
 
-namespace TrussModelling.Models;
+namespace CSIModellingTools.Models;
 
 public enum EditableRowStatus
 {

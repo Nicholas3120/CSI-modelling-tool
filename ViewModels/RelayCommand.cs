@@ -1,6 +1,6 @@
 using System.Windows.Input;
 
-namespace TrussModelling.ViewModels;
+namespace CSIModellingTools.ViewModels;
 
 public sealed class RelayCommand : ICommand
 {

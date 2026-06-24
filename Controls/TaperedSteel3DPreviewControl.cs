@@ -3,9 +3,9 @@ using System.Windows.Media;
 using System.Windows.Media.Media3D;
 using System.Windows.Threading;
 using HelixToolkit.Wpf;
-using TrussModelling.Models;
+using CSIModellingTools.Models;
 
-namespace TrussModelling.Controls;
+namespace CSIModellingTools.Controls;
 
 public sealed class TaperedSteel3DPreviewControl : HelixViewport3D
 {

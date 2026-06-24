@@ -1,6 +1,6 @@
 using System.Globalization;
 
-namespace TrussModelling.Models;
+namespace CSIModellingTools.Models;
 
 public enum TrussType
 {

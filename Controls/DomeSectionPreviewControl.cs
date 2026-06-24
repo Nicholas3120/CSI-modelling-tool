@@ -1,9 +1,9 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
-using TrussModelling.Models;
+using CSIModellingTools.Models;
 
-namespace TrussModelling.Controls;
+namespace CSIModellingTools.Controls;
 
 public sealed class DomeSectionPreviewControl : FrameworkElement
 {
