@@ -185,33 +185,6 @@ Features:
 - Export as erase-and-redraw or add-as-new with offset.
 - Validation, 3D preview, section preview, and warning table.
 
-### Hydrostatic Shell Load
-
-The `Hydrostatic Shell Load` tab assigns ETABS shell uniform-to-linear hydrostatic pressure coefficients.
-
-Target options:
-
-- Currently selected ETABS shell objects.
-- ETABS group.
-- Explicit shell object name list.
-
-Height options:
-
-- Full wall height from selected shell geometry.
-- Water table elevation to shell/wall bottom.
-- Custom top and bottom elevations.
-
-Pressure and assignment options:
-
-- Load pattern name, with optional creation if missing.
-- Unit weight in kN/m3.
-- Surcharge in kN/m2.
-- Direction in global X, Y, or Z.
-- Positive or negative sign.
-- Restriction option: use all values, zero negative values, or zero positive values.
-- Assignment option: replace existing loads, add to existing loads, or delete existing loads.
-- Preview report with shell count, top and bottom pressures, pressure coefficients, levels, warnings, and target shell names.
-
 ### Railing
 
 The `railing` tab generates a steel railing frame model.

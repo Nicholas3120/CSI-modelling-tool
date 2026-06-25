@@ -140,7 +140,6 @@ public sealed class ParametricModellingViewModel : ObservableObject
         PlateGirder = new PlateGirderViewModel();
         Railing = new SteelRailingViewModel();
         WallDrain = new WallDrainViewModel();
-        HydrostaticShellLoad = new HydrostaticShellLoadViewModel();
         LoadCaseCombination = new LoadCaseCombinationViewModel();
         SectionProperty = new SectionPropertyViewModel();
         ModelCompare = new ModelCompareViewModel();
@@ -175,7 +174,6 @@ public sealed class ParametricModellingViewModel : ObservableObject
     public PlateGirderViewModel PlateGirder { get; }
     public SteelRailingViewModel Railing { get; }
     public WallDrainViewModel WallDrain { get; }
-    public HydrostaticShellLoadViewModel HydrostaticShellLoad { get; }
     public LoadCaseCombinationViewModel LoadCaseCombination { get; }
     public SectionPropertyViewModel SectionProperty { get; }
     public ModelCompareViewModel ModelCompare { get; }
