@@ -137,8 +137,6 @@ public sealed class ParametricModellingViewModel : ObservableObject
     {
         Dome = new DomeStructureViewModel();
         PlateGirder = new PlateGirderViewModel();
-        BeamSplice = new BeamSpliceConnectionViewModel();
-        PileEccMoment = new PileEccentricityViewModel();
         Railing = new SteelRailingViewModel();
         WallDrain = new WallDrainViewModel();
         HydrostaticShellLoad = new HydrostaticShellLoadViewModel();
@@ -173,8 +171,6 @@ public sealed class ParametricModellingViewModel : ObservableObject
 
     public DomeStructureViewModel Dome { get; }
     public PlateGirderViewModel PlateGirder { get; }
-    public BeamSpliceConnectionViewModel BeamSplice { get; }
-    public PileEccentricityViewModel PileEccMoment { get; }
     public SteelRailingViewModel Railing { get; }
     public WallDrainViewModel WallDrain { get; }
     public HydrostaticShellLoadViewModel HydrostaticShellLoad { get; }

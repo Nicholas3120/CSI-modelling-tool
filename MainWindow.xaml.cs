@@ -25,15 +25,4 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
-    private void OpenPileCalculationSheet_Click(object sender, RoutedEventArgs e)
-    {
-        if (sender is not FrameworkElement { DataContext: PileEccentricityViewModel viewModel })
-            return;
-
-        var window = new PileEccentricityCalculationSheetWindow(viewModel)
-        {
-            Owner = this
-        };
-        window.Show();
-    }
 }

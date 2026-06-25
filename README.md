@@ -161,47 +161,6 @@ ETABS features:
 - Validate generated shell mesh and assignments.
 - Send generated shell objects and optional load to ETABS.
 
-### Beam Splice Connection
-
-The `Beam Splice Connection` tab is a local calculation tool for bolted beam splice checks.
-
-Inputs include:
-
-- Design moment, design shear, lever arm, and beam depth.
-- Bolt diameter, hole diameter, ultimate strength, alpha-v factor, bolt counts, and shear planes for flange and web bolts.
-- Cover plate and web plate dimensions.
-- Plate yield and ultimate strengths.
-- End distance, edge distance, pitch, gauge, rows along force, and lines across force.
-- Partial factors `gammaM0` and `gammaM2`.
-
-Calculated outputs include:
-
-- Flange force from moment divided by lever arm.
-- Web shear.
-- Bolt shear resistance.
-- Bolt bearing resistance.
-- Plate shear resistance.
-- Simplified block tearing resistance.
-- Utilization and OK/NG status for each check.
-- Notes describing the calculation assumptions.
-
-### Pile Ecc Point Load
-
-The `Pile Ecc Point Load` tab is a local calculator for pile group eccentricity and idealized tie-beam transfer.
-
-Features:
-
-- Standard layout builder for one, two, three, or four piles per group.
-- Builder inputs for local and adjacent group IDs, column locations, column spacing, pile diameter, pile spacing in diameters, pile-cap rotation, pile shifts, loads, compression capacity, and tension capacity.
-- Manual tables for pile groups, pile rows, and tie beams.
-- Isolated pile load calculation from vertical load and eccentricity moments.
-- Ideal tie-beam transfer option that treats selected eccentricity as a point load on a simply supported tie beam.
-- Revised pile loads after tie-beam transfer.
-- Tie-beam section design steps for Eurocode-style rectangular beam reinforcement checks.
-- Before/after summary table for group reaction, remaining moments, max pile load, min pile load, and uplift status.
-- 2D pile/tie-beam preview.
-- Calculation sheet window that groups formulas, substitutions, results, comparison rows, warnings, and notes.
-
 ### Wall / Drain
 
 The `Wall / Drain` tab generates retaining wall and drain geometry as either frame or shell models.
@@ -358,7 +317,6 @@ CSI Modelling Tools.csproj                 WPF project file and ETABS/Helix refe
 CSI Modelling Tools.slnx                   Visual Studio solution file
 App.xaml, MainWindow.xaml                  WPF application and main tabbed UI
 MainWindow.xaml.cs                         Main window event handlers
-PileEccentricityCalculationSheetWindow.*   Calculation sheet window for pile eccentricity
 Models/                                    Data transfer objects, enums, rows, and result models
 ViewModels/                                UI state, commands, validation calls, and data binding logic
 Services/                                  ETABS API service, geometry generators, validators, calculators

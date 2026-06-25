@@ -1632,6 +1632,7 @@
                     </Grid>
                 </Grid>
             </TabItem>
+            <!-- Removed Beam Splice Connection and Pile Ecc Point Load tabs.
             <TabItem Header="Beam Splice Connection" DataContext="{Binding BeamSplice}">
                 <Grid Margin="12">
                     <Grid.ColumnDefinitions>
@@ -2179,6 +2180,7 @@
                     </Grid>
                 </Grid>
             </TabItem>
+            -->
             <TabItem Header="Wall / Drain" DataContext="{Binding WallDrain}">
                 <Grid Margin="12">
                     <Grid.RowDefinitions>
@@ -2886,7 +2888,7 @@
                     </Grid>
                 </Grid>
             </TabItem>
-            <TabItem Header="railing" DataContext="{Binding Railing}">
+            <TabItem Header="Railing" DataContext="{Binding Railing}">
                 <Grid Margin="12">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
