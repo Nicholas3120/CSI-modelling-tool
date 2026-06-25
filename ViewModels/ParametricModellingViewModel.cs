@@ -144,6 +144,7 @@ public sealed class ParametricModellingViewModel : ObservableObject
         HydrostaticShellLoad = new HydrostaticShellLoadViewModel();
         LoadCaseCombination = new LoadCaseCombinationViewModel();
         SectionProperty = new SectionPropertyViewModel();
+        ModelCompare = new ModelCompareViewModel();
         RefreshEtabsInstancesCommand = new RelayCommand(_ => RefreshEtabsInstances());
         ReadEtabsDataCommand = new RelayCommand(_ => ReadEtabsData());
         ReadSelectedPointsCommand = new RelayCommand(_ => ReadSelectedPoints());
@@ -179,6 +180,7 @@ public sealed class ParametricModellingViewModel : ObservableObject
     public HydrostaticShellLoadViewModel HydrostaticShellLoad { get; }
     public LoadCaseCombinationViewModel LoadCaseCombination { get; }
     public SectionPropertyViewModel SectionProperty { get; }
+    public ModelCompareViewModel ModelCompare { get; }
 
     public IReadOnlyList<string> TrussTypes { get; } =
     [

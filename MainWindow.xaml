@@ -4715,6 +4715,163 @@
                     </Grid>
                 </Grid>
             </TabItem>
+            <TabItem Header="Model Compare" DataContext="{Binding ModelCompare}">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="150"/>
+                    </Grid.RowDefinitions>
+
+                    <GroupBox Header="ETABS Snapshot" Grid.Row="0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="380"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0"
+                                    Content="Refresh ETABS Instances"
+                                    Command="{Binding RefreshEtabsInstancesCommand}"/>
+                            <ComboBox Grid.Column="1"
+                                      ItemsSource="{Binding EtabsInstances}"
+                                      SelectedItem="{Binding SelectedEtabsInstance}"
+                                      DisplayMemberPath="DisplayName"/>
+                            <Button Grid.Column="2"
+                                    Content="Create ETABS Snapshot"
+                                    Command="{Binding CreateEtabsSnapshotCommand}"/>
+                            <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="8,0,0,0">
+                                <TextBlock Text="{Binding ConnectionStatus, StringFormat=Status: {0}}"
+                                           FontWeight="SemiBold"
+                                           Foreground="#075985"
+                                           Margin="0,0,14,0"/>
+                                <ProgressBar Width="110"
+                                             Height="10"
+                                             IsIndeterminate="True"
+                                             Visibility="{Binding BusyVisibility}"/>
+                            </StackPanel>
+                            <TextBlock Grid.Row="1"
+                                       Grid.ColumnSpan="4"
+                                       Text="{Binding OperationStatus}"
+                                       Foreground="#475569"
+                                       Margin="0,8,0,0"
+                                       TextTrimming="CharacterEllipsis"/>
+                        </Grid>
+                    </GroupBox>
+
+                    <GroupBox Header="Snapshot Files" Grid.Row="1">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="105"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+
+                            <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Old Snapshot"/>
+                            <TextBox Grid.Row="0"
+                                     Grid.Column="1"
+                                     Text="{Binding OldSnapshotPath, UpdateSourceTrigger=PropertyChanged}"/>
+                            <Button Grid.Row="0"
+                                    Grid.Column="2"
+                                    Content="Browse"
+                                    Command="{Binding BrowseOldSnapshotCommand}"/>
+                            <Button Grid.Row="0"
+                                    Grid.Column="3"
+                                    Content="Load Old"
+                                    Command="{Binding LoadOldSnapshotCommand}"/>
+
+                            <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="New Snapshot"/>
+                            <TextBox Grid.Row="1"
+                                     Grid.Column="1"
+                                     Text="{Binding NewSnapshotPath, UpdateSourceTrigger=PropertyChanged}"/>
+                            <Button Grid.Row="1"
+                                    Grid.Column="2"
+                                    Content="Browse"
+                                    Command="{Binding BrowseNewSnapshotCommand}"/>
+                            <Button Grid.Row="1"
+                                    Grid.Column="3"
+                                    Content="Load New"
+                                    Command="{Binding LoadNewSnapshotCommand}"/>
+                        </Grid>
+                    </GroupBox>
+
+                    <GroupBox Header="Compare Summary" Grid.Row="2">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Row="0" Grid.Column="0">
+                                <TextBlock Text="{Binding OldSnapshotSummary}" Foreground="#475569" Margin="0,0,0,4"/>
+                                <TextBlock Text="{Binding NewSnapshotSummary}" Foreground="#475569"/>
+                            </StackPanel>
+                            <Button Grid.Row="0"
+                                    Grid.Column="1"
+                                    Content="Compare"
+                                    Command="{Binding CompareSnapshotsCommand}"/>
+                            <UniformGrid Grid.Row="1"
+                                         Grid.ColumnSpan="2"
+                                         Columns="5"
+                                         Margin="0,10,0,0">
+                                <TextBlock Text="{Binding FramesAddedCount, StringFormat=Frames added: {0}}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding FramesDeletedCount, StringFormat=Frames deleted: {0}}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding SectionChangesCount, StringFormat=Section changes: {0}}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding MaterialChangesCount, StringFormat=Material changes: {0}}" FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding PropertyDefinitionChangesCount, StringFormat=Property changes: {0}}" FontWeight="SemiBold"/>
+                            </UniformGrid>
+                        </Grid>
+                    </GroupBox>
+
+                    <GroupBox Header="Comparison Results" Grid.Row="3">
+                        <DataGrid ItemsSource="{Binding Results}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  CanUserAddRows="False"
+                                  GridLinesVisibility="Horizontal"
+                                  HeadersVisibility="Column">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Change" Binding="{Binding ChangeType}" Width="90"/>
+                                <DataGridTextColumn Header="Object" Binding="{Binding ObjectType}" Width="115"/>
+                                <DataGridTextColumn Header="Description / Location" Binding="{Binding ObjectDescription}" Width="*"/>
+                                <DataGridTextColumn Header="Old Value" Binding="{Binding OldValue}" Width="170"/>
+                                <DataGridTextColumn Header="New Value" Binding="{Binding NewValue}" Width="170"/>
+                                <DataGridTextColumn Header="Severity" Binding="{Binding Importance}" Width="90"/>
+                                <DataGridTextColumn Header="Confidence" Binding="{Binding Confidence, StringFormat=0.###}" Width="90"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+
+                    <GroupBox Header="Messages" Grid.Row="4">
+                        <DataGrid ItemsSource="{Binding Messages}"
+                                  AutoGenerateColumns="False"
+                                  IsReadOnly="True"
+                                  CanUserAddRows="False"
+                                  GridLinesVisibility="Horizontal"
+                                  HeadersVisibility="Column">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Severity" Binding="{Binding SeverityText}" Width="95"/>
+                                <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
         </TabControl>
     </DockPanel>
 </Window>
