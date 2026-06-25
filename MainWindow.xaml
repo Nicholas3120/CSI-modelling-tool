@@ -747,6 +747,148 @@
                     </Grid>
                 </Grid>
             </TabItem>
+            <TabItem Header="City of Tomorrow" DataContext="{Binding CityOfTomorrow}">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="185"/>
+                    </Grid.RowDefinitions>
+
+                    <GroupBox Header="ETABS Connection" Grid.Row="0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="380"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Content="Refresh ETABS Instances" Command="{Binding RefreshEtabsInstancesCommand}"/>
+                            <ComboBox Grid.Column="1" ItemsSource="{Binding EtabsInstances}" SelectedItem="{Binding SelectedEtabsInstance}" DisplayMemberPath="DisplayName"/>
+                            <Button Grid.Column="2" Content="Read ETABS Sections" Command="{Binding ReadEtabsDataCommand}"/>
+                            <TextBlock Grid.Column="3" Margin="8,0,0,0" FontWeight="SemiBold" Foreground="#075985"
+                                       Text="{Binding ConnectionStatus, StringFormat=Status: {0}}"/>
+                        </Grid>
+                    </GroupBox>
+
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="480"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <GroupBox Header="Symmetrical Vierendeel Geometry">
+                                    <StackPanel>
+                                        <Grid Margin="0,0,0,4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="145"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Structure ID"/>
+                                            <TextBox Grid.Column="1" Text="{Binding StructureId, UpdateSourceTrigger=PropertyChanged}"/>
+                                        </Grid>
+                                        <controls:SliderNumberInput Label="Clear span L" Unit="m" Minimum="10" Maximum="500" SmallChange="0.5" LargeChange="10" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding ClearSpanL, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Panels per half N" Unit="nos" Minimum="1" Maximum="50" SmallChange="1" LargeChange="5" IsInteger="True" LiveTextUpdate="True"
+                                                                    Value="{Binding PanelsPerHalfN, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Vierendeel depth H" Unit="m" Minimum="0.5" Maximum="100" SmallChange="0.25" LargeChange="2" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding VierendeelDepthH, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Bottom chord Z" Unit="m" Minimum="-50" Maximum="200" SmallChange="0.5" LargeChange="5" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding BottomChordLevelZ, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Mid rail ratio" Unit="" Minimum="0.05" Maximum="0.95" SmallChange="0.05" LargeChange="0.1" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding MidRailRatio, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Global tie Z" Unit="m" Minimum="-100" Maximum="150" SmallChange="0.5" LargeChange="5" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding TieLevelZ, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Anchor width" Unit="m" Minimum="1" Maximum="100" SmallChange="0.5" LargeChange="5" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding ExternalAnchorWidth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Side-frame height" Unit="m" Minimum="1" Maximum="100" SmallChange="0.5" LargeChange="5" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding ExternalSideFrameHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Pile-cap Z" Unit="m" Minimum="-50" Maximum="100" SmallChange="0.5" LargeChange="5" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding PileCapLevelZ, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                    </StackPanel>
+                                </GroupBox>
+
+                                <GroupBox Header="ETABS Frame Sections">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="165"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Top chord"/>
+                                        <ComboBox Grid.Row="0" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding TopChordSection}"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Intermediate rail"/>
+                                        <ComboBox Grid.Row="1" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding MidRailSection}"/>
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Bottom chord"/>
+                                        <ComboBox Grid.Row="2" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding BottomChordSection}"/>
+                                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Vertical posts"/>
+                                        <ComboBox Grid.Row="3" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding VerticalPostSection}"/>
+                                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Tower / piles"/>
+                                        <ComboBox Grid.Row="4" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding TowerSection}"/>
+                                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Side frames"/>
+                                        <ComboBox Grid.Row="5" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding SideFrameSection}"/>
+                                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Cable / backstay"/>
+                                        <ComboBox Grid.Row="6" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding CableSection}"/>
+                                        <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Global tie"/>
+                                        <ComboBox Grid.Row="7" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding TieCableSection}"/>
+                                    </Grid>
+                                </GroupBox>
+
+                                <GroupBox Header="Generate in ETABS">
+                                    <StackPanel>
+                                        <WrapPanel Margin="0,0,0,8">
+                                            <Button Content="Validate" Command="{Binding ValidateCommand}"/>
+                                            <Button Content="Generate New Model" Command="{Binding GenerateNewModelCommand}"/>
+                                            <Button Content="Regenerate This Structure" Command="{Binding RegenerateStructureCommand}"/>
+                                            <Button Content="Clear Generated Structure" Command="{Binding ClearGeneratedStructureCommand}"/>
+                                        </WrapPanel>
+                                        <TextBlock Text="{Binding GenerationReport}" TextWrapping="Wrap" FontWeight="Normal" Foreground="#475569"/>
+                                    </StackPanel>
+                                </GroupBox>
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <Grid Grid.Column="2">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <GroupBox Header="Calculated Geometry" Grid.Row="0">
+                                <WrapPanel>
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Total panels:"/>
+                                    <TextBlock Style="{StaticResource FieldValue}" Text="{Binding TotalPanels}" Margin="0,7,18,3"/>
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Panel width:"/>
+                                    <TextBlock Style="{StaticResource FieldValue}" Text="{Binding PanelWidth, StringFormat={}{0:0.###} m}" Margin="0,7,18,3"/>
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Points:"/>
+                                    <TextBlock Style="{StaticResource FieldValue}" Text="{Binding NodeCount}" Margin="0,7,18,3"/>
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Frames:"/>
+                                    <TextBlock Style="{StaticResource FieldValue}" Text="{Binding FrameCount}" Margin="0,7,18,3"/>
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Tension-only:"/>
+                                    <TextBlock Style="{StaticResource FieldValue}" Text="{Binding TensionOnlyCount}"/>
+                                </WrapPanel>
+                            </GroupBox>
+                            <GroupBox Grid.Row="1" Header="Live 2D X-Z Topology Preview">
+                                <controls:CityOfTomorrowPreviewControl Model="{Binding CurrentModel}" MinHeight="430"/>
+                            </GroupBox>
+                        </Grid>
+                    </Grid>
+
+                    <GroupBox Grid.Row="2" Header="Symmetry / Connectivity Validation" Margin="0,10,0,0">
+                        <DataGrid ItemsSource="{Binding Messages}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" GridLinesVisibility="Horizontal">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Severity" Binding="{Binding SeverityText}" Width="95"/>
+                                <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
             <TabItem Header="Existing ETABS Sections">
                 <Grid Margin="12">
                     <Grid.RowDefinitions>
@@ -1632,555 +1774,7 @@
                     </Grid>
                 </Grid>
             </TabItem>
-            <!-- Removed Beam Splice Connection and Pile Ecc Point Load tabs.
-            <TabItem Header="Beam Splice Connection" DataContext="{Binding BeamSplice}">
-                <Grid Margin="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="430"/>
-                        <ColumnDefinition Width="12"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
 
-                    <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
-                        <StackPanel>
-                            <GroupBox Header="Actions">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="165"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Moment kNm"/>
-                                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding DesignMomentKnM, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Shear kN"/>
-                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding DesignShearKn, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Lever arm m"/>
-                                    <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding LeverArmM, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                </Grid>
-                            </GroupBox>
-
-                            <GroupBox Header="Bolts">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="165"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Bolt dia mm"/>
-                                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding BoltDiameterMm, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Hole dia mm"/>
-                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding BoltHoleDiameterMm, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="fub MPa"/>
-                                    <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding BoltUltimateStrengthMpa, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="alpha v"/>
-                                    <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding BoltAlphaV, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Flange bolts / side"/>
-                                    <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding FlangeBoltsPerSide, UpdateSourceTrigger=LostFocus}"/>
-                                    <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Web bolts / side"/>
-                                    <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding WebBoltsPerSide, UpdateSourceTrigger=LostFocus}"/>
-                                    <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Flange shear planes"/>
-                                    <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding FlangeBoltShearPlanes, UpdateSourceTrigger=LostFocus}"/>
-                                    <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Web shear planes"/>
-                                    <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding WebBoltShearPlanes, UpdateSourceTrigger=LostFocus}"/>
-                                </Grid>
-                            </GroupBox>
-
-                            <GroupBox Header="Plates And Layout">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="165"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Cover plate width"/>
-                                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding CoverPlateWidthMm, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Cover plate thk"/>
-                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding CoverPlateThicknessMm, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Web plate depth"/>
-                                    <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding WebPlateDepthMm, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Web plate thk"/>
-                                    <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding WebPlateThicknessMm, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="fy plate MPa"/>
-                                    <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding PlateYieldStrengthMpa, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="fu plate MPa"/>
-                                    <TextBox Grid.Row="5" Grid.Column="1" Text="{Binding PlateUltimateStrengthMpa, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="End dist e1"/>
-                                    <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding EndDistanceMm, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Edge dist e2"/>
-                                    <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding EdgeDistanceMm, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="8" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Pitch p1"/>
-                                    <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding PitchMm, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="9" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Gauge p2"/>
-                                    <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding GaugeMm, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="10" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Rows along force"/>
-                                    <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding BoltRowsAlongForce, UpdateSourceTrigger=LostFocus}"/>
-                                    <TextBlock Grid.Row="11" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Lines across force"/>
-                                    <TextBox Grid.Row="11" Grid.Column="1" Text="{Binding BoltLinesAcrossForce, UpdateSourceTrigger=LostFocus}"/>
-                                </Grid>
-                            </GroupBox>
-                        </StackPanel>
-                    </ScrollViewer>
-
-                    <Grid Grid.Column="2">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="*"/>
-                            <RowDefinition Height="150"/>
-                        </Grid.RowDefinitions>
-                        <GroupBox Grid.Row="0" Header="Summary">
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="{Binding FlangeForceDisplay}" FontWeight="SemiBold" Margin="0,0,18,0"/>
-                                <TextBlock Text="{Binding WebShearDisplay}" FontWeight="SemiBold" Margin="0,0,18,0"/>
-                                <TextBlock Text="{Binding MaxUtilizationDisplay}" FontWeight="SemiBold"/>
-                            </StackPanel>
-                        </GroupBox>
-                        <GroupBox Grid.Row="1" Header="Eurocode 3 Simple Checks">
-                            <DataGrid ItemsSource="{Binding Checks}"
-                                      AutoGenerateColumns="False"
-                                      IsReadOnly="True"
-                                      CanUserAddRows="False"
-                                      GridLinesVisibility="Horizontal"
-                                      HeadersVisibility="Column">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Check" Binding="{Binding Check}" Width="140"/>
-                                    <DataGridTextColumn Header="Target" Binding="{Binding Target}" Width="210"/>
-                                    <DataGridTextColumn Header="Demand kN" Binding="{Binding DemandKn, StringFormat=0.##}" Width="95"/>
-                                    <DataGridTextColumn Header="Resistance kN" Binding="{Binding ResistanceKn, StringFormat=0.##}" Width="110"/>
-                                    <DataGridTextColumn Header="Util" Binding="{Binding Utilization, StringFormat=0.###}" Width="70"/>
-                                    <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="65"/>
-                                </DataGrid.Columns>
-                            </DataGrid>
-                        </GroupBox>
-                        <GroupBox Grid.Row="2" Header="Notes">
-                            <ListBox ItemsSource="{Binding Notes}"/>
-                        </GroupBox>
-                    </Grid>
-                </Grid>
-            </TabItem>
-            <TabItem Header="Pile Ecc Point Load" DataContext="{Binding PileEccMoment}">
-                <Grid Margin="12">
-                    <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="470"/>
-                        <ColumnDefinition Width="12"/>
-                        <ColumnDefinition Width="*"/>
-                    </Grid.ColumnDefinitions>
-
-                    <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
-                        <StackPanel>
-                            <GroupBox Header="Standard Layout Builder">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="135"/>
-                                        <ColumnDefinition Width="82"/>
-                                        <ColumnDefinition Width="135"/>
-                                        <ColumnDefinition Width="*"/>
-                                    </Grid.ColumnDefinitions>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="Auto"/>
-                                    </Grid.RowDefinitions>
-
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Local group"/>
-                                    <TextBox Grid.Row="0" Grid.Column="1" Text="{Binding BuilderLocalGroupId, UpdateSourceTrigger=PropertyChanged}"/>
-                                    <TextBlock Grid.Row="0" Grid.Column="2" Style="{StaticResource FieldLabel}" Text="Adjacent group"/>
-                                    <TextBox Grid.Row="0" Grid.Column="3" Text="{Binding BuilderAdjacentGroupId, UpdateSourceTrigger=PropertyChanged}"/>
-
-                                    <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Local col X"/>
-                                    <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding BuilderLocalColumnX, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="1" Grid.Column="2" Style="{StaticResource FieldLabel}" Text="Local col Y"/>
-                                    <TextBox Grid.Row="1" Grid.Column="3" Text="{Binding BuilderLocalColumnY, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-
-                                    <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Adjacent dist X"/>
-                                    <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding BuilderColumnSpacingX, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-                                    <TextBlock Grid.Row="2" Grid.Column="2" Style="{StaticResource FieldLabel}" Text="Adjacent dist Y"/>
-                                    <TextBox Grid.Row="2" Grid.Column="3" Text="{Binding BuilderColumnSpacingY, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
-
-                                    <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Local pile group"/>
-                                    <ComboBox Grid.Row="3" Grid.Column="1"
-                                              MinWidth="0"
-                                              ItemsSource="{Binding StandardPileGroupLayouts}"
-                                              SelectedItem="{Binding BuilderLocalPileGroupLayout}"/>
-                                    <TextBlock Grid.Row="3" Grid.Column="2" Style="{StaticResource FieldLabel}" Text="Adjacent pile group"/>
-                                    <ComboBox Grid.Row="3" Grid.Column="3"
-                                              MinWidth="0"
-                                              ItemsSource="{Binding StandardPileGroupLayouts}"
-                                              SelectedItem="{Binding BuilderAdjacentPileGroupLayout}"/>
-
-                                    <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Pile dia mm"/>
-                                    <TextBox Grid.Row="4" Grid.Column="1" Text="{Binding BuilderPileDiameterMm, UpdateSourceTrigger=LostFocus}"/>
-                                    <TextBlock Grid.Row="4" Grid.Column="2" Style="{StaticResource FieldLabel}" Text="Spacing dia"/>
-                                    <TextBox Grid.Row="4" Grid.Column="3" Text="{Binding BuilderSpacingDiameters, UpdateSourceTrigger=LostFocus}"/>
-
-                                    <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Spacing c/c"/>
-                                    <TextBlock Grid.Row="5" Grid.Column="1" Style="{StaticResource FieldValue}" Text="{Binding BuilderSpacingDisplay}"/>
-                                    <TextBlock Grid.Row="5" Grid.Column="2" Style="{StaticResource FieldLabel}" Text="Local rotate deg"/>
-                                    <TextBox Grid.Row="5" Grid.Column="3" Text="{Binding BuilderLocalPileCapRotationDegrees, UpdateSourceTrigger=LostFocus}"/>
-
-                                    <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Adjacent rotate deg"/>
-                                    <TextBox Grid.Row="6" Grid.Column="1" Text="{Binding BuilderAdjacentPileCapRotationDegrees, UpdateSourceTrigger=LostFocus}"/>
-                                    <TextBlock Grid.Row="6" Grid.Column="2" Style="{StaticResource FieldLabel}" Text="Comp cap kN"/>
-                                    <TextBox Grid.Row="6" Grid.Column="3" Text="{Binding BuilderCompressionCapacitykN, UpdateSourceTrigger=LostFocus}"/>
-
-                                    <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Default local ecc X mm"/>
-                                    <TextBox Grid.Row="7" Grid.Column="1" Text="{Binding BuilderLocalPileShiftXmm, UpdateSourceTrigger=LostFocus}"/>
-                                    <TextBlock Grid.Row="7" Grid.Column="2" Style="{StaticResource FieldLabel}" Text="Default local ecc Y mm"/>
-                                    <TextBox Grid.Row="7" Grid.Column="3" Text="{Binding BuilderLocalPileShiftYmm, UpdateSourceTrigger=LostFocus}"/>
-
-                                    <TextBlock Grid.Row="8" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Default adj ecc X mm"/>
-                                    <TextBox Grid.Row="8" Grid.Column="1" Text="{Binding BuilderAdjacentPileShiftXmm, UpdateSourceTrigger=LostFocus}"/>
-                                    <TextBlock Grid.Row="8" Grid.Column="2" Style="{StaticResource FieldLabel}" Text="Default adj ecc Y mm"/>
-                                    <TextBox Grid.Row="8" Grid.Column="3" Text="{Binding BuilderAdjacentPileShiftYmm, UpdateSourceTrigger=LostFocus}"/>
-
-                                    <TextBlock Grid.Row="9" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Local N kN"/>
-                                    <TextBox Grid.Row="9" Grid.Column="1" Text="{Binding BuilderLocalLoadkN, UpdateSourceTrigger=LostFocus}"/>
-                                    <TextBlock Grid.Row="9" Grid.Column="2" Style="{StaticResource FieldLabel}" Text="Adjacent N kN"/>
-                                    <TextBox Grid.Row="9" Grid.Column="3" Text="{Binding BuilderAdjacentLoadkN, UpdateSourceTrigger=LostFocus}"/>
-
-                                    <TextBlock Grid.Row="10" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Tension cap kN"/>
-                                    <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding BuilderTensionCapacitykN, UpdateSourceTrigger=LostFocus}"/>
-                                    <WrapPanel Grid.Row="10" Grid.Column="2" Grid.ColumnSpan="2" Margin="0,4,0,0">
-                                        <Button Content="Load Example" Command="{Binding LoadExampleCommand}"/>
-                                    </WrapPanel>
-                                </Grid>
-                            </GroupBox>
-
-                            <GroupBox Header="Pile Group Table">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="160"/>
-                                    </Grid.RowDefinitions>
-                                    <WrapPanel Grid.Row="0" Margin="0,0,0,8">
-                                        <Button Content="Add Group" Command="{Binding AddPileGroupCommand}"/>
-                                        <Button Content="Remove Group" Command="{Binding RemovePileGroupCommand}"/>
-                                        <Button Content="Load Example" Command="{Binding LoadExampleCommand}"/>
-                                    </WrapPanel>
-                                    <DataGrid Grid.Row="1"
-                                              ItemsSource="{Binding PileGroups}"
-                                              SelectedItem="{Binding SelectedPileGroup}"
-                                              AutoGenerateColumns="False"
-                                              CanUserAddRows="False"
-                                              GridLinesVisibility="Horizontal"
-                                              HeadersVisibility="Column">
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Group" Binding="{Binding GroupId, UpdateSourceTrigger=PropertyChanged}" Width="70"/>
-                                            <DataGridTextColumn Header="Col X" Binding="{Binding ColumnX, UpdateSourceTrigger=LostFocus, StringFormat=0.###}" Width="70"/>
-                                            <DataGridTextColumn Header="Col Y" Binding="{Binding ColumnY, UpdateSourceTrigger=LostFocus, StringFormat=0.###}" Width="70"/>
-                                            <DataGridTextColumn Header="N kN" Binding="{Binding VerticalLoadNkN, UpdateSourceTrigger=LostFocus, StringFormat=0.##}" Width="80"/>
-                                            <DataGridTextColumn Header="Add Mx" Binding="{Binding AdditionalMxkNm, UpdateSourceTrigger=LostFocus, StringFormat=0.##}" Width="80"/>
-                                            <DataGridTextColumn Header="Add My" Binding="{Binding AdditionalMykNm, UpdateSourceTrigger=LostFocus, StringFormat=0.##}" Width="80"/>
-                                            <DataGridCheckBoxColumn Header="Active" Binding="{Binding IsActive}" Width="60"/>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                </Grid>
-                            </GroupBox>
-
-                            <GroupBox Header="Pile Eccentricity Table">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="210"/>
-                                    </Grid.RowDefinitions>
-                                    <WrapPanel Grid.Row="0" Margin="0,0,0,8">
-                                        <Button Content="Add Pile" Command="{Binding AddPileCommand}"/>
-                                        <Button Content="Remove Pile" Command="{Binding RemovePileCommand}"/>
-                                    </WrapPanel>
-                                    <DataGrid Grid.Row="1"
-                                              ItemsSource="{Binding Piles}"
-                                              SelectedItem="{Binding SelectedPile}"
-                                              AutoGenerateColumns="False"
-                                              CanUserAddRows="False"
-                                              GridLinesVisibility="Horizontal"
-                                              HeadersVisibility="Column">
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Group" Binding="{Binding GroupId, UpdateSourceTrigger=PropertyChanged}" Width="65"/>
-                                            <DataGridTextColumn Header="Pile" Binding="{Binding PileId, UpdateSourceTrigger=PropertyChanged}" Width="60"/>
-                                            <DataGridTextColumn Header="Ecc X mm" Binding="{Binding ShiftXmm, UpdateSourceTrigger=LostFocus, StringFormat=0.#}" Width="82"/>
-                                            <DataGridTextColumn Header="Ecc Y mm" Binding="{Binding ShiftYmm, UpdateSourceTrigger=LostFocus, StringFormat=0.#}" Width="82"/>
-                                            <DataGridTextColumn Header="Dia mm" Binding="{Binding DiameterMm, UpdateSourceTrigger=LostFocus, StringFormat=0.#}" Width="70"/>
-                                            <DataGridTextColumn Header="Comp kN" Binding="{Binding CompressionCapacitykN, UpdateSourceTrigger=LostFocus, StringFormat=0.##}" Width="78"/>
-                                            <DataGridTextColumn Header="Tens kN" Binding="{Binding TensionCapacitykN, UpdateSourceTrigger=LostFocus, StringFormat=0.##}" Width="78"/>
-                                            <DataGridCheckBoxColumn Header="Active" Binding="{Binding IsActive}" Width="60"/>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                </Grid>
-                            </GroupBox>
-
-                            <GroupBox Header="Tie Beam Table">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto"/>
-                                        <RowDefinition Height="220"/>
-                                    </Grid.RowDefinitions>
-                                    <WrapPanel Grid.Row="0" Margin="0,0,0,8">
-                                        <Button Content="Add Tie Beam" Command="{Binding AddTieBeamCommand}"/>
-                                        <Button Content="Remove Tie Beam" Command="{Binding RemoveTieBeamCommand}"/>
-                                    </WrapPanel>
-                                    <DataGrid Grid.Row="1"
-                                              ItemsSource="{Binding TieBeams}"
-                                              SelectedItem="{Binding SelectedTieBeam}"
-                                              AutoGenerateColumns="False"
-                                              CanUserAddRows="False"
-                                              GridLinesVisibility="Horizontal"
-                                              HeadersVisibility="Column">
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Tie" Binding="{Binding TieBeamId, UpdateSourceTrigger=PropertyChanged}" Width="60"/>
-                                            <DataGridTextColumn Header="From" Binding="{Binding FromGroupId, UpdateSourceTrigger=PropertyChanged}" Width="65"/>
-                                            <DataGridTextColumn Header="To" Binding="{Binding ToGroupId, UpdateSourceTrigger=PropertyChanged}" Width="65"/>
-                                            <DataGridTextColumn Header="b mm" Binding="{Binding WidthMm, UpdateSourceTrigger=LostFocus, StringFormat=0.#}" Width="70"/>
-                                            <DataGridTextColumn Header="h mm" Binding="{Binding DepthMm, UpdateSourceTrigger=LostFocus, StringFormat=0.#}" Width="70"/>
-                                            <DataGridTextColumn Header="fck" Binding="{Binding ConcreteStrengthNmm2, UpdateSourceTrigger=LostFocus, StringFormat=0.#}" Width="58"/>
-                                            <DataGridTextColumn Header="fyk" Binding="{Binding SteelYieldStrengthNmm2, UpdateSourceTrigger=LostFocus, StringFormat=0.#}" Width="58"/>
-                                            <DataGridTextColumn Header="Cover" Binding="{Binding CoverMm, UpdateSourceTrigger=LostFocus, StringFormat=0.#}" Width="65"/>
-                                            <DataGridTextColumn Header="Link" Binding="{Binding LinkDiameterMm, UpdateSourceTrigger=LostFocus, StringFormat=0.#}" Width="58"/>
-                                            <DataGridTextColumn Header="T bar" Binding="{Binding TensionBarDiameterMm, UpdateSourceTrigger=LostFocus, StringFormat=0.#}" Width="62"/>
-                                            <DataGridTextColumn Header="C bar" Binding="{Binding CompressionBarDiameterMm, UpdateSourceTrigger=LostFocus, StringFormat=0.#}" Width="62"/>
-                                            <DataGridTextColumn Header="L" Binding="{Binding Length, UpdateSourceTrigger=LostFocus, StringFormat=0.###}" Width="65"/>
-                                            <DataGridCheckBoxColumn Header="Auto L" Binding="{Binding UseAutoLength}" Width="62"/>
-                                            <DataGridTextColumn Header="Load %" Binding="{Binding TransferPercentagePercent, UpdateSourceTrigger=LostFocus, StringFormat=0.#}" Width="70"/>
-                                            <DataGridCheckBoxColumn Header="Active" Binding="{Binding IsActive}" Width="60"/>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                </Grid>
-                            </GroupBox>
-
-                            <GroupBox Header="Calculation Control">
-                                <StackPanel>
-                                    <CheckBox Content="Use Ideal Tie Beam Transfer"
-                                              IsChecked="{Binding UseIdealTieBeamTransfer}"
-                                              Margin="0,0,0,8"/>
-                                    <WrapPanel>
-                                        <Button Content="Calculate Isolated Pile Group"
-                                                Command="{Binding CalculateIsolatedCommand}"/>
-                                        <Button Content="Recalculate With Tie Beam"
-                                                Command="{Binding RecalculateWithTieBeamCommand}"/>
-                                    </WrapPanel>
-                                    <TextBlock Text="{Binding CalculationStatus}"
-                                               FontWeight="SemiBold"
-                                               Foreground="#075985"
-                                               Margin="0,8,0,0"/>
-                                    <TextBlock Text="{Binding ResultSummary}"
-                                               Foreground="#475569"
-                                               Margin="0,4,0,0"/>
-                                </StackPanel>
-                            </GroupBox>
-                        </StackPanel>
-                    </ScrollViewer>
-
-                    <Grid Grid.Column="2">
-                        <Grid.RowDefinitions>
-                            <RowDefinition Height="300"/>
-                            <RowDefinition Height="*"/>
-                            <RowDefinition Height="Auto"/>
-                            <RowDefinition Height="145"/>
-                        </Grid.RowDefinitions>
-
-                        <GroupBox Grid.Row="0" Header="Preview Panel">
-                            <controls:PileEccentricityPreviewControl Model="{Binding CurrentPreview}"
-                                                                      MinHeight="250"/>
-                        </GroupBox>
-
-                        <GroupBox Grid.Row="1" Header="Result Panel">
-                            <TabControl>
-                                <TabItem Header="Geometry">
-                                    <DataGrid ItemsSource="{Binding GeometrySummaries}"
-                                              AutoGenerateColumns="False"
-                                              IsReadOnly="True"
-                                              CanUserAddRows="False"
-                                              GridLinesVisibility="Horizontal"
-                                              HeadersVisibility="Column">
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Group" Binding="{Binding GroupId}" Width="75"/>
-                                            <DataGridTextColumn Header="Piles" Binding="{Binding ActivePileCount}" Width="60"/>
-                                            <DataGridTextColumn Header="Centroid X" Binding="{Binding CentroidX, StringFormat=0.###}" Width="95"/>
-                                            <DataGridTextColumn Header="Centroid Y" Binding="{Binding CentroidY, StringFormat=0.###}" Width="95"/>
-                                            <DataGridTextColumn Header="ex" Binding="{Binding Ex, StringFormat=0.###}" Width="75"/>
-                                            <DataGridTextColumn Header="ey" Binding="{Binding Ey, StringFormat=0.###}" Width="75"/>
-                                            <DataGridTextColumn Header="Mx kNm" Binding="{Binding MxkNm, StringFormat=0.##}" Width="95"/>
-                                            <DataGridTextColumn Header="My kNm" Binding="{Binding MykNm, StringFormat=0.##}" Width="95"/>
-                                            <DataGridTextColumn Header="Sum x0'^2" Binding="{Binding SumX2, StringFormat=0.###}" Width="90"/>
-                                            <DataGridTextColumn Header="Sum y0'^2" Binding="{Binding SumY2, StringFormat=0.###}" Width="90"/>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                </TabItem>
-
-                                <TabItem Header="Isolated Loads">
-                                    <DataGrid ItemsSource="{Binding IsolatedPileLoads}"
-                                              AutoGenerateColumns="False"
-                                              IsReadOnly="True"
-                                              CanUserAddRows="False"
-                                              GridLinesVisibility="Horizontal"
-                                              HeadersVisibility="Column">
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Group" Binding="{Binding GroupId}" Width="75"/>
-                                            <DataGridTextColumn Header="Pile" Binding="{Binding PileId}" Width="65"/>
-                                            <DataGridTextColumn Header="x0'" Binding="{Binding XLocal, StringFormat=0.###}" Width="75"/>
-                                            <DataGridTextColumn Header="y0'" Binding="{Binding YLocal, StringFormat=0.###}" Width="75"/>
-                                            <DataGridTextColumn Header="Rv/n" Binding="{Binding BaseLoadkN, StringFormat=0.##}" Width="95"/>
-                                            <DataGridTextColumn Header="Due to Mx" Binding="{Binding LoadFromMxkN, StringFormat=0.##}" Width="95"/>
-                                            <DataGridTextColumn Header="Due to My" Binding="{Binding LoadFromMykN, StringFormat=0.##}" Width="95"/>
-                                            <DataGridTextColumn Header="Final kN" Binding="{Binding FinalLoadkN, StringFormat=0.##}" Width="90"/>
-                                            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="150"/>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                </TabItem>
-
-                                <TabItem Header="Tie Transfer">
-                                    <Grid>
-                                        <Grid.RowDefinitions>
-                                            <RowDefinition Height="2*"/>
-                                            <RowDefinition Height="220"/>
-                                        </Grid.RowDefinitions>
-                                        <DataGrid Grid.Row="0"
-                                                  ItemsSource="{Binding TieBeamSummaries}"
-                                                  SelectedItem="{Binding SelectedTieBeamSummary}"
-                                                  AutoGenerateColumns="False"
-                                                  IsReadOnly="True"
-                                                  CanUserAddRows="False"
-                                                  GridLinesVisibility="Horizontal"
-                                                  HeadersVisibility="Column">
-                                            <DataGrid.Columns>
-                                                <DataGridTextColumn Header="Tie Beam" Binding="{Binding TieBeamId}" Width="80"/>
-                                                <DataGridTextColumn Header="From" Binding="{Binding FromGroupId}" Width="75"/>
-                                                <DataGridTextColumn Header="To" Binding="{Binding ToGroupId}" Width="75"/>
-                                                <DataGridTextColumn Header="P" Binding="{Binding PointLoadkN, StringFormat=0.##}" Width="75"/>
-                                                <DataGridTextColumn Header="a From" Binding="{Binding LoadDistanceA, StringFormat=0.###}" Width="75"/>
-                                                <DataGridTextColumn Header="b To" Binding="{Binding LoadDistanceB, StringFormat=0.###}" Width="75"/>
-                                                <DataGridTextColumn Header="Length L" Binding="{Binding Length, StringFormat=0.###}" Width="75"/>
-                                                <DataGridTextColumn Header="Case" Binding="{Binding CaseType}" Width="135"/>
-                                                <DataGridTextColumn Header="RA From" Binding="{Binding FromSupportReactionkN, StringFormat=0.##}" Width="85"/>
-                                                <DataGridTextColumn Header="RB To" Binding="{Binding ToSupportReactionkN, StringFormat=0.##}" Width="85"/>
-                                                <DataGridTextColumn Header="M Design" Binding="{Binding DesignMomentkNm, StringFormat=0.##}" Width="90"/>
-                                                <DataGridTextColumn Header="M Type" Binding="{Binding MomentType}" Width="85"/>
-                                                <DataGridTextColumn Header="K" Binding="{Binding EurocodeK, StringFormat=0.####}" Width="70"/>
-                                                <DataGridTextColumn Header="K Check" Binding="{Binding EurocodeKCheck}" Width="90"/>
-                                                <DataGridTextColumn Header="Comp Bar" Binding="{Binding CompressionBarRequired}" Width="78"/>
-                                                <DataGridTextColumn Header="Ast req" Binding="{Binding RequiredTensionSteelMm2, StringFormat=0.#}" Width="85"/>
-                                                <DataGridTextColumn Header="Asc req" Binding="{Binding RequiredCompressionSteelMm2, StringFormat=0.#}" Width="85"/>
-                                                <DataGridTextColumn Header="Tension Bars" Binding="{Binding SuggestedTensionBars}" Width="95"/>
-                                                <DataGridTextColumn Header="Comp Bars" Binding="{Binding SuggestedCompressionBars}" Width="95"/>
-                                                <DataGridTextColumn Header="Tension Face" Binding="{Binding TensionFace}" Width="90"/>
-                                                <DataGridTextColumn Header="Delta From" Binding="{Binding FromEffect}" Width="130"/>
-                                                <DataGridTextColumn Header="Delta To" Binding="{Binding ToEffect}" Width="130"/>
-                                            </DataGrid.Columns>
-                                        </DataGrid>
-                                        <controls:TieBeamSectionPreviewControl Grid.Row="1"
-                                                                               Summary="{Binding SelectedTieBeamSummary}"
-                                                                               Margin="0,8,0,0"
-                                                                               MinHeight="210"/>
-                                    </Grid>
-                                </TabItem>
-
-                                <TabItem Header="Revised Loads">
-                                    <DataGrid ItemsSource="{Binding RevisedPileLoads}"
-                                              AutoGenerateColumns="False"
-                                              IsReadOnly="True"
-                                              CanUserAddRows="False"
-                                              GridLinesVisibility="Horizontal"
-                                              HeadersVisibility="Column">
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Group" Binding="{Binding GroupId}" Width="75"/>
-                                            <DataGridTextColumn Header="Pile" Binding="{Binding PileId}" Width="65"/>
-                                            <DataGridTextColumn Header="Revised Rv share" Binding="{Binding BaseLoadkN, StringFormat=0.##}" Width="120"/>
-                                            <DataGridTextColumn Header="Mx rem effect" Binding="{Binding LoadFromMxkN, StringFormat=0.##}" Width="110"/>
-                                            <DataGridTextColumn Header="My rem effect" Binding="{Binding LoadFromMykN, StringFormat=0.##}" Width="110"/>
-                                            <DataGridTextColumn Header="Final kN" Binding="{Binding FinalLoadkN, StringFormat=0.##}" Width="90"/>
-                                            <DataGridTextColumn Header="Status" Binding="{Binding Status}" Width="150"/>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                </TabItem>
-
-                                <TabItem Header="Before / After">
-                                    <DataGrid ItemsSource="{Binding Comparisons}"
-                                              AutoGenerateColumns="False"
-                                              IsReadOnly="True"
-                                              CanUserAddRows="False"
-                                              GridLinesVisibility="Horizontal"
-                                              HeadersVisibility="Column">
-                                        <DataGrid.Columns>
-                                            <DataGridTextColumn Header="Group" Binding="{Binding GroupId}" Width="75"/>
-                                            <DataGridTextColumn Header="Case" Binding="{Binding CaseName}" Width="150"/>
-                                            <DataGridTextColumn Header="Rv kN" Binding="{Binding RvkN, StringFormat=0.##}" Width="90"/>
-                                            <DataGridTextColumn Header="Mx rem" Binding="{Binding MxRemainingkNm, StringFormat=0.##}" Width="90"/>
-                                            <DataGridTextColumn Header="My rem" Binding="{Binding MyRemainingkNm, StringFormat=0.##}" Width="90"/>
-                                            <DataGridTextColumn Header="Max Pile" Binding="{Binding MaxPileLoadkN, StringFormat=0.##}" Width="95"/>
-                                            <DataGridTextColumn Header="Min Pile" Binding="{Binding MinPileLoadkN, StringFormat=0.##}" Width="95"/>
-                                            <DataGridTextColumn Header="Uplift" Binding="{Binding Uplift}" Width="75"/>
-                                        </DataGrid.Columns>
-                                    </DataGrid>
-                                </TabItem>
-                            </TabControl>
-                        </GroupBox>
-
-                        <Border Grid.Row="2"
-                                BorderBrush="#cbd5e1"
-                                BorderThickness="1"
-                                Background="#f8fafc"
-                                Padding="8"
-                                Margin="0,0,0,10">
-                            <DockPanel LastChildFill="False">
-                                <TextBlock Text="Calculation Sheet"
-                                           FontWeight="SemiBold"
-                                           VerticalAlignment="Center"/>
-                                <Button DockPanel.Dock="Right"
-                                        Content="Open Calculation Sheet"
-                                        Click="OpenPileCalculationSheet_Click"/>
-                            </DockPanel>
-                        </Border>
-
-                        <GroupBox Grid.Row="3" Header="Warnings and Notes">
-                            <DataGrid ItemsSource="{Binding Messages}"
-                                      AutoGenerateColumns="False"
-                                      IsReadOnly="True"
-                                      CanUserAddRows="False"
-                                      GridLinesVisibility="Horizontal"
-                                      HeadersVisibility="Column">
-                                <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Severity" Binding="{Binding SeverityText}" Width="95"/>
-                                    <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*"/>
-                                </DataGrid.Columns>
-                            </DataGrid>
-                        </GroupBox>
-                    </Grid>
-                </Grid>
-            </TabItem>
-            -->
             <TabItem Header="Wall / Drain" DataContext="{Binding WallDrain}">
                 <Grid Margin="12">
                     <Grid.RowDefinitions>

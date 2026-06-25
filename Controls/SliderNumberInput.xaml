@@ -27,8 +27,10 @@
                 Value="{Binding Value, ElementName=Root, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                 VerticalAlignment="Center"
                 Margin="0,0,8,0"/>
-        <TextBox Grid.Column="2"
+        <TextBox x:Name="ValueBox"
+                 Grid.Column="2"
                  Text="{Binding ValueText, ElementName=Root, Mode=TwoWay, UpdateSourceTrigger=LostFocus}"
+                 TextChanged="ValueBox_TextChanged"
                  MinWidth="0"/>
         <TextBlock Grid.Column="3"
                    Text="{Binding Unit, ElementName=Root}"

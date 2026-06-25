@@ -2,6 +2,7 @@ using System.ComponentModel;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Data;
 
 namespace CSIModellingTools.Controls;
 
@@ -60,6 +61,9 @@ public partial class SliderNumberInput : UserControl, INotifyPropertyChanged
             typeof(bool),
             typeof(SliderNumberInput),
             new PropertyMetadata(false, OnFormatChanged));
+
+    public static readonly DependencyProperty LiveTextUpdateProperty =
+        DependencyProperty.Register(nameof(LiveTextUpdate), typeof(bool), typeof(SliderNumberInput), new PropertyMetadata(false));
 
     public SliderNumberInput()
     {
@@ -121,6 +125,12 @@ public partial class SliderNumberInput : UserControl, INotifyPropertyChanged
     {
         get => (bool)GetValue(IsIntegerProperty);
         set => SetValue(IsIntegerProperty, value);
+    }
+
+    public bool LiveTextUpdate
+    {
+        get => (bool)GetValue(LiveTextUpdateProperty);
+        set => SetValue(LiveTextUpdateProperty, value);
     }
 
     public string ValueText
@@ -199,6 +209,12 @@ public partial class SliderNumberInput : UserControl, INotifyPropertyChanged
         int places = Math.Clamp(DecimalPlaces, 0, 6);
         string format = places == 0 ? "0" : "0." + new string('#', places);
         return value.ToString(format, CultureInfo.CurrentCulture);
+    }
+
+    private void ValueBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (!LiveTextUpdate || _updatingText || sender is not TextBox textBox) return;
+        textBox.GetBindingExpression(TextBox.TextProperty)?.UpdateSource();
     }
 
     private void OnPropertyChanged(string propertyName)

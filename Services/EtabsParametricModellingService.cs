@@ -8,7 +8,7 @@ using CSIModellingTools.Models;
 
 namespace CSIModellingTools.Services;
 
-public sealed class EtabsParametricModellingService
+public sealed partial class EtabsParametricModellingService
 {
     private const string EtabsApiObjectProgId = "CSI.ETABS.API.ETABSObject";
     private const ETABSv1.eUnits EtabsUnitsKnMC = ETABSv1.eUnits.kN_m_C;
