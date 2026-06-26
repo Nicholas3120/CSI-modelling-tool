@@ -1,0 +1,23 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "SAP2000v1/27.1.0": {
+        "runtime": {
+          "SAP2000v1.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "SAP2000v1/27.1.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

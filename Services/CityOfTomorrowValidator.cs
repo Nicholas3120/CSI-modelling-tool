@@ -25,10 +25,15 @@ public sealed class CityOfTomorrowValidator
         {
             ["top chord"] = input.TopChordSection, ["intermediate rail"] = input.MidRailSection,
             ["bottom chord"] = input.BottomChordSection, ["vertical posts"] = input.VerticalPostSection,
-            ["tower"] = input.TowerSection, ["side frame"] = input.SideFrameSection,
-            ["cables"] = input.CableSection, ["global tie"] = input.TieCableSection
+            ["tower"] = input.TowerSection, ["side frame"] = input.SideFrameSection
         })
-            Critical(result, string.IsNullOrWhiteSpace(value), $"Select an ETABS section for {label}.");
+            Critical(result, string.IsNullOrWhiteSpace(value), $"Select a CSI frame section for {label}.");
+
+        foreach ((string label, string value) in new Dictionary<string, string>
+        {
+            ["cables/backstays"] = input.CableSection, ["global tie/tendon"] = input.TieCableSection
+        })
+            Critical(result, string.IsNullOrWhiteSpace(value), $"Select a CSI cable or tendon section for {label}.");
 
         var nodes = model.Nodes.ToDictionary(node => node.Key, StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i <= p && n >= 1; i++)
@@ -57,7 +62,7 @@ public sealed class CityOfTomorrowValidator
         if (!result.HasCriticalIssues)
         {
             result.Issues.Add(new ValidationIssue { Severity = ValidationSeverity.Info, Message = $"Geometry valid: {p} symmetrical panels, {model.Nodes.Count} points, {model.FrameMemberCount} frames and {model.TensionOnlyMemberCount} tension-only members." });
-            result.Issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, Message = "Use a nonlinear ETABS load case for tension-only cable behavior and define project-specific pretension, large-displacement and out-of-plane assumptions." });
+            result.Issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, Message = "Use a nonlinear CSI load case for tension-only cable behavior and define project-specific pretension, large-displacement and out-of-plane assumptions." });
         }
         return result;
     }

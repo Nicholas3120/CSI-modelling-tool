@@ -10,8 +10,11 @@ public sealed class CityOfTomorrowViewModel : ObservableObject
     private readonly CityOfTomorrowGeometryBuilder _builder = new();
     private readonly CityOfTomorrowValidator _validator = new();
     private readonly EtabsParametricModellingService _etabs = new();
+    private readonly Sap2000ModellingService _sap2000 = new();
     private EtabsInstanceInfo? _selectedEtabsInstance;
+    private Sap2000InstanceInfo? _selectedSap2000Instance;
     private string _connectionStatus = "Not connected";
+    private string _sap2000ConnectionStatus = "Not connected";
     private string _structureId = "VFR_01";
     private double _clearSpanL = 100, _depth = 18, _bottomZ = 20, _midRatio = 0.5, _tieZ = 2, _anchorWidth = 10, _sideHeight = 8, _pileCapZ;
     private int _panelsPerHalf = 5;
@@ -27,11 +30,18 @@ public sealed class CityOfTomorrowViewModel : ObservableObject
         GenerateNewModelCommand = new RelayCommand(_ => Draw(false));
         RegenerateStructureCommand = new RelayCommand(_ => Draw(true));
         ClearGeneratedStructureCommand = new RelayCommand(_ => Clear());
+        RefreshSap2000InstancesCommand = new RelayCommand(_ => RefreshSap2000Instances());
+        ReadSap2000DataCommand = new RelayCommand(_ => ReadSap2000Data());
+        GenerateNewSap2000ModelCommand = new RelayCommand(_ => DrawSap2000(false));
+        RegenerateSap2000StructureCommand = new RelayCommand(_ => DrawSap2000(true));
+        ClearSap2000StructureCommand = new RelayCommand(_ => ClearSap2000());
         Rebuild();
     }
 
     public ObservableCollection<EtabsInstanceInfo> EtabsInstances { get; } = [];
+    public ObservableCollection<Sap2000InstanceInfo> Sap2000Instances { get; } = [];
     public ObservableCollection<string> FrameSections { get; } = [];
+    public ObservableCollection<string> TensionMemberSections { get; } = [];
     public ObservableCollection<ValidationIssue> Messages { get; } = [];
     public ICommand RefreshEtabsInstancesCommand { get; }
     public ICommand ReadEtabsDataCommand { get; }
@@ -39,9 +49,16 @@ public sealed class CityOfTomorrowViewModel : ObservableObject
     public ICommand GenerateNewModelCommand { get; }
     public ICommand RegenerateStructureCommand { get; }
     public ICommand ClearGeneratedStructureCommand { get; }
+    public ICommand RefreshSap2000InstancesCommand { get; }
+    public ICommand ReadSap2000DataCommand { get; }
+    public ICommand GenerateNewSap2000ModelCommand { get; }
+    public ICommand RegenerateSap2000StructureCommand { get; }
+    public ICommand ClearSap2000StructureCommand { get; }
 
     public EtabsInstanceInfo? SelectedEtabsInstance { get => _selectedEtabsInstance; set => SetProperty(ref _selectedEtabsInstance, value); }
+    public Sap2000InstanceInfo? SelectedSap2000Instance { get => _selectedSap2000Instance; set => SetProperty(ref _selectedSap2000Instance, value); }
     public string ConnectionStatus { get => _connectionStatus; set => SetProperty(ref _connectionStatus, value); }
+    public string Sap2000ConnectionStatus { get => _sap2000ConnectionStatus; set => SetProperty(ref _sap2000ConnectionStatus, value); }
     public string StructureId { get => _structureId; set { if (SetProperty(ref _structureId, value ?? "")) Rebuild(); } }
     public double ClearSpanL { get => _clearSpanL; set { if (SetProperty(ref _clearSpanL, Finite(value, 100))) Rebuild(); } }
     public int PanelsPerHalfN { get => _panelsPerHalf; set { if (SetProperty(ref _panelsPerHalf, Math.Clamp(value, 1, 50))) Rebuild(); } }
@@ -94,8 +111,30 @@ public sealed class CityOfTomorrowViewModel : ObservableObject
         Replace(EtabsInstances, result.Instances);
         SelectedEtabsInstance = EtabsInstances.FirstOrDefault(x => x.Id == result.SelectedInstanceId) ?? EtabsInstances.FirstOrDefault();
         Replace(FrameSections, result.FrameSections);
+        Replace(TensionMemberSections, result.FrameSections);
         PickSections();
         ConnectionStatus = result.Message;
+        Show(result.Warnings, result.Message, result.IsError);
+    }
+
+    private void RefreshSap2000Instances()
+    {
+        Sap2000InstanceListResult result = _sap2000.ListSap2000Instances();
+        Replace(Sap2000Instances, result.Instances);
+        SelectedSap2000Instance = Sap2000Instances.FirstOrDefault();
+        Sap2000ConnectionStatus = result.Message;
+        Show(result.Warnings, result.Message, result.IsError);
+    }
+
+    private void ReadSap2000Data()
+    {
+        Sap2000ModelDataResult result = _sap2000.ListModelData(new Sap2000ModelDataRequest { Sap2000InstanceId = SelectedSap2000Instance?.Id });
+        Replace(Sap2000Instances, result.Instances);
+        SelectedSap2000Instance = Sap2000Instances.FirstOrDefault(x => x.Id == result.SelectedInstanceId) ?? Sap2000Instances.FirstOrDefault();
+        Replace(FrameSections, result.FrameSections);
+        Replace(TensionMemberSections, result.TensionMemberSections);
+        PickSections(allowFrameFallbackForTension: false);
+        Sap2000ConnectionStatus = result.Message;
         Show(result.Warnings, result.Message, result.IsError);
     }
 
@@ -122,6 +161,21 @@ public sealed class CityOfTomorrowViewModel : ObservableObject
         Show(result.Warnings, result.Message, result.IsError);
     }
 
+    private void DrawSap2000(bool replace)
+    {
+        if (!Validate(true)) { GenerationReport = "SAP2000 generation blocked: resolve critical validation messages."; return; }
+        CityOfTomorrowDrawResult result = _sap2000.DrawCityOfTomorrow(new Sap2000CityOfTomorrowDrawRequest { Sap2000InstanceId = SelectedSap2000Instance?.Id, Model = CurrentModel, ReplaceExistingStructure = replace });
+        GenerationReport = result.Message + Environment.NewLine + "Cables/ties: SAP2000 cable or tendon objects using the selected cable/tendon property; use nonlinear analysis.";
+        Show(result.Warnings, result.Message, result.IsError);
+    }
+
+    private void ClearSap2000()
+    {
+        CityOfTomorrowDrawResult result = _sap2000.ClearCityOfTomorrow(new Sap2000CityOfTomorrowClearRequest { Sap2000InstanceId = SelectedSap2000Instance?.Id, GroupName = GroupName });
+        GenerationReport = result.Message;
+        Show(result.Warnings, result.Message, result.IsError);
+    }
+
     private void Rebuild() => CurrentModel = _builder.Build(new CityOfTomorrowInput
     {
         StructureId = StructureId, ClearSpanL = ClearSpanL, PanelsPerHalfN = PanelsPerHalfN, VierendeelDepthH = VierendeelDepthH,
@@ -131,14 +185,16 @@ public sealed class CityOfTomorrowViewModel : ObservableObject
         TowerSection = TowerSection, SideFrameSection = SideFrameSection, CableSection = CableSection, TieCableSection = TieCableSection
     });
 
-    private void PickSections()
+    private void PickSections(bool allowFrameFallbackForTension = true)
     {
         string first = FrameSections.FirstOrDefault() ?? "";
+        string firstTension = TensionMemberSections.FirstOrDefault() ?? (allowFrameFallbackForTension ? first : "");
         TopChordSection = Pick(TopChordSection, first); MidRailSection = Pick(MidRailSection, first); BottomChordSection = Pick(BottomChordSection, first);
         VerticalPostSection = Pick(VerticalPostSection, first); TowerSection = Pick(TowerSection, first); SideFrameSection = Pick(SideFrameSection, first);
-        CableSection = Pick(CableSection, first); TieCableSection = Pick(TieCableSection, first);
+        CableSection = PickTension(CableSection, firstTension); TieCableSection = PickTension(TieCableSection, firstTension);
     }
     private string Pick(string current, string fallback) => current.Length > 0 && FrameSections.Contains(current) ? current : fallback;
+    private string PickTension(string current, string fallback) => current.Length > 0 && TensionMemberSections.Contains(current) ? current : fallback;
     private void Show(IEnumerable<string> warnings, string summary, bool error)
     {
         var issues = new List<ValidationIssue> { new() { Severity = error ? ValidationSeverity.Critical : ValidationSeverity.Info, Message = summary } };

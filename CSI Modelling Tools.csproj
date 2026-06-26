@@ -10,6 +10,8 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
     <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
   </PropertyGroup>
 
@@ -19,7 +21,19 @@
       <Private>true</Private>
       <SpecificVersion>false</SpecificVersion>
     </Reference>
+    <Reference Include="CSiAPIv1">
+      <HintPath>$(MSBuildThisFileDirectory)lib\CSiAPIv1.dll</HintPath>
+      <Private>true</Private>
+      <SpecificVersion>false</SpecificVersion>
+    </Reference>
+    <Reference Include="SAP2000v1">
+      <HintPath>$(MSBuildThisFileDirectory)lib\SAP2000v1.dll</HintPath>
+      <Private>true</Private>
+      <SpecificVersion>false</SpecificVersion>
+    </Reference>
     <None Include="lib\ETABSv1.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="lib\CSiAPIv1.*" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="lib\SAP2000v1.*" CopyToOutputDirectory="PreserveNewest" Visible="false" />
     <None Include="PropertyLibraries\*.xml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
@@ -32,6 +46,10 @@
            Text="The .NET SDK was not detected. Install the .NET 8 SDK or later, then restore/build this project again." />
     <Error Condition="!Exists('$(MSBuildThisFileDirectory)lib\ETABSv1.dll')"
            Text="Missing lib\ETABSv1.dll. Copy the full project folder, including the lib folder, before building." />
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)lib\SAP2000v1.dll')"
+           Text="Missing lib\SAP2000v1.dll. Copy the full project folder, including the lib folder, before building." />
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)lib\CSiAPIv1.dll')"
+           Text="Missing lib\CSiAPIv1.dll. Copy the full project folder, including the lib folder, before building." />
   </Target>
 
 </Project>

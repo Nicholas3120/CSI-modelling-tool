@@ -755,21 +755,38 @@
                         <RowDefinition Height="185"/>
                     </Grid.RowDefinitions>
 
-                    <GroupBox Header="ETABS Connection" Grid.Row="0">
-                        <Grid>
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="380"/>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Button Grid.Column="0" Content="Refresh ETABS Instances" Command="{Binding RefreshEtabsInstancesCommand}"/>
-                            <ComboBox Grid.Column="1" ItemsSource="{Binding EtabsInstances}" SelectedItem="{Binding SelectedEtabsInstance}" DisplayMemberPath="DisplayName"/>
-                            <Button Grid.Column="2" Content="Read ETABS Sections" Command="{Binding ReadEtabsDataCommand}"/>
-                            <TextBlock Grid.Column="3" Margin="8,0,0,0" FontWeight="SemiBold" Foreground="#075985"
-                                       Text="{Binding ConnectionStatus, StringFormat=Status: {0}}"/>
-                        </Grid>
-                    </GroupBox>
+                    <StackPanel Grid.Row="0">
+                        <GroupBox Header="ETABS Connection">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="380"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Button Grid.Column="0" Content="Refresh ETABS Instances" Command="{Binding RefreshEtabsInstancesCommand}"/>
+                                <ComboBox Grid.Column="1" ItemsSource="{Binding EtabsInstances}" SelectedItem="{Binding SelectedEtabsInstance}" DisplayMemberPath="DisplayName"/>
+                                <Button Grid.Column="2" Content="Read ETABS Sections" Command="{Binding ReadEtabsDataCommand}"/>
+                                <TextBlock Grid.Column="3" Margin="8,0,0,0" FontWeight="SemiBold" Foreground="#075985"
+                                           Text="{Binding ConnectionStatus, StringFormat=Status: {0}}"/>
+                            </Grid>
+                        </GroupBox>
+                        <GroupBox Header="SAP2000 Connection" Margin="0,8,0,0">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="380"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Button Grid.Column="0" Content="Refresh SAP2000 Instances" Command="{Binding RefreshSap2000InstancesCommand}"/>
+                                <ComboBox Grid.Column="1" ItemsSource="{Binding Sap2000Instances}" SelectedItem="{Binding SelectedSap2000Instance}" DisplayMemberPath="DisplayName"/>
+                                <Button Grid.Column="2" Content="Read SAP2000 Sections" Command="{Binding ReadSap2000DataCommand}"/>
+                                <TextBlock Grid.Column="3" Margin="8,0,0,0" FontWeight="SemiBold" Foreground="#075985"
+                                           Text="{Binding Sap2000ConnectionStatus, StringFormat=Status: {0}}"/>
+                            </Grid>
+                        </GroupBox>
+                    </StackPanel>
 
                     <Grid Grid.Row="1">
                         <Grid.ColumnDefinitions>
@@ -811,7 +828,7 @@
                                     </StackPanel>
                                 </GroupBox>
 
-                                <GroupBox Header="ETABS Frame Sections">
+                                <GroupBox Header="CSI Frame Sections">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="165"/>
@@ -834,19 +851,22 @@
                                         <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Side frames"/>
                                         <ComboBox Grid.Row="5" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding SideFrameSection}"/>
                                         <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Cable / backstay"/>
-                                        <ComboBox Grid.Row="6" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding CableSection}"/>
-                                        <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Global tie"/>
-                                        <ComboBox Grid.Row="7" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding TieCableSection}"/>
+                                        <ComboBox Grid.Row="6" Grid.Column="1" MinWidth="0" ItemsSource="{Binding TensionMemberSections}" SelectedItem="{Binding CableSection}"/>
+                                        <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Global tie / tendon"/>
+                                        <ComboBox Grid.Row="7" Grid.Column="1" MinWidth="0" ItemsSource="{Binding TensionMemberSections}" SelectedItem="{Binding TieCableSection}"/>
                                     </Grid>
                                 </GroupBox>
 
-                                <GroupBox Header="Generate in ETABS">
+                                <GroupBox Header="Generate in CSI Products">
                                     <StackPanel>
                                         <WrapPanel Margin="0,0,0,8">
                                             <Button Content="Validate" Command="{Binding ValidateCommand}"/>
-                                            <Button Content="Generate New Model" Command="{Binding GenerateNewModelCommand}"/>
-                                            <Button Content="Regenerate This Structure" Command="{Binding RegenerateStructureCommand}"/>
-                                            <Button Content="Clear Generated Structure" Command="{Binding ClearGeneratedStructureCommand}"/>
+                                            <Button Content="Generate New ETABS Model" Command="{Binding GenerateNewModelCommand}"/>
+                                            <Button Content="Regenerate ETABS Structure" Command="{Binding RegenerateStructureCommand}"/>
+                                            <Button Content="Clear ETABS Structure" Command="{Binding ClearGeneratedStructureCommand}"/>
+                                            <Button Content="Generate New SAP2000 Model" Command="{Binding GenerateNewSap2000ModelCommand}"/>
+                                            <Button Content="Regenerate SAP2000 Structure" Command="{Binding RegenerateSap2000StructureCommand}"/>
+                                            <Button Content="Clear SAP2000 Structure" Command="{Binding ClearSap2000StructureCommand}"/>
                                         </WrapPanel>
                                         <TextBlock Text="{Binding GenerationReport}" TextWrapping="Wrap" FontWeight="Normal" Foreground="#475569"/>
                                     </StackPanel>
