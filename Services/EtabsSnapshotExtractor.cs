@@ -39,19 +39,39 @@ internal sealed class EtabsSnapshotExtractor
             ? GetModelCompareAreaGroups(_sapModel, groupWarnings, groupNames)
             : new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
 
+        // One bulk read of every point coordinate. Used to resolve area corner coordinates without a
+        // per-corner COM call. If it is unavailable the per-object reads below remain as a fallback.
+        Dictionary<string, (double X, double Y, double Z)> pointCoordinates = TryGetAllPointCoordinates(_sapModel);
+
         var frameWarnings = new List<string>();
-        bool frameNamesRead = TryGetAllFrameNamesForSnapshot(_sapModel, frameWarnings, out List<string> frameNames);
         if (!framePropertyNamesRead)
             frameWarnings.Add("Frame section material data is unavailable because frame property definitions could not be read.");
-        List<ModelCompareFrameSnapshot> frames = (frameNamesRead ? frameNames : [])
-            .Select(frameName => ReadModelCompareFrameSnapshot(_sapModel, frameName, materialBySection, groupsByFrameName, frameWarnings))
-            .Where(frame => frame != null)
-            .Select(frame => frame!)
-            .OrderBy(frame => frame.FrameName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-        bool framesRead = frameNamesRead && frames.Count == frameNames.Count;
-        if (frameNamesRead && frames.Count != frameNames.Count)
-            frameWarnings.Add($"Frame extraction was marked failed because {frameNames.Count - frames.Count} of {frameNames.Count} listed ETABS frames had unreadable geometry.");
+
+        // Fast path: pull all frame geometry, sections, stories, endpoints and coordinates in a single
+        // GetAllFrames call. Falls back to the per-frame reads if the bulk call is unavailable.
+        Dictionary<string, string> frameLabels = TryGetFrameLabels(_sapModel);
+        bool frameNamesRead = TryGetAllFramesSnapshot(
+            _sapModel,
+            materialBySection,
+            groupsByFrameName,
+            frameLabels,
+            frameWarnings,
+            out List<ModelCompareFrameSnapshot> frames,
+            out int expectedFrameCount);
+        if (!frameNamesRead)
+        {
+            frameNamesRead = TryGetAllFrameNamesForSnapshot(_sapModel, frameWarnings, out List<string> frameNames);
+            frames = (frameNamesRead ? frameNames : [])
+                .Select(frameName => ReadModelCompareFrameSnapshot(_sapModel, frameName, materialBySection, groupsByFrameName, frameWarnings))
+                .Where(frame => frame != null)
+                .Select(frame => frame!)
+                .OrderBy(frame => frame.FrameName, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+            expectedFrameCount = frameNamesRead ? frameNames.Count : 0;
+        }
+        bool framesRead = frameNamesRead && frames.Count == expectedFrameCount;
+        if (frameNamesRead && frames.Count != expectedFrameCount)
+            frameWarnings.Add($"Frame extraction was marked failed because {expectedFrameCount - frames.Count} of {expectedFrameCount} listed ETABS frames had unreadable geometry.");
 
         var areaPropertyWarnings = new List<string>();
         bool areaPropertyNamesRead = TryGetAreaPropertyNamesForSnapshot(_sapModel, areaPropertyWarnings, out List<string> areaPropertyNames);
@@ -70,7 +90,7 @@ internal sealed class EtabsSnapshotExtractor
         if (!areaPropertyNamesRead)
             areaWarnings.Add("Area material and thickness data are unavailable because area property definitions could not be read.");
         List<ModelCompareAreaObjectSnapshot> areas = (areaNamesRead ? areaNames : [])
-            .Select(areaName => ReadModelCompareAreaSnapshot(_sapModel, areaName, areaPropertyByName, groupsByAreaName, areaWarnings))
+            .Select(areaName => ReadModelCompareAreaSnapshot(_sapModel, areaName, areaPropertyByName, groupsByAreaName, pointCoordinates, areaWarnings))
             .Where(area => area != null)
             .Select(area => area!)
             .OrderBy(area => area.AreaName, StringComparer.OrdinalIgnoreCase)
@@ -341,6 +361,213 @@ internal sealed class EtabsSnapshotExtractor
             .ToList();
     }
 
+    private static Dictionary<string, (double X, double Y, double Z)> TryGetAllPointCoordinates(ETABSv1.cSapModel sapModel)
+    {
+        var coordinates = new Dictionary<string, (double X, double Y, double Z)>(StringComparer.OrdinalIgnoreCase);
+        int numberNames = 0;
+        string[] names = [];
+        double[] x = [];
+        double[] y = [];
+        double[] z = [];
+
+        try
+        {
+            int ret = sapModel.PointObj.GetAllPoints(ref numberNames, ref names, ref x, ref y, ref z, "Global");
+            if (ret != 0)
+                return coordinates;
+
+            int count = Math.Min(numberNames, Math.Min(names.Length, Math.Min(x.Length, Math.Min(y.Length, z.Length))));
+            for (int index = 0; index < count; index++)
+            {
+                string pointName = (names[index] ?? "").Trim();
+                if (pointName.Length == 0)
+                    continue;
+
+                coordinates[pointName] = (x[index], y[index], z[index]);
+            }
+        }
+        catch
+        {
+            // Bulk point coordinates are an optional accelerator; per-object reads remain as a fallback.
+        }
+
+        return coordinates;
+    }
+
+    private static Dictionary<string, string> TryGetFrameLabels(ETABSv1.cSapModel sapModel)
+    {
+        var labels = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        int numberNames = 0;
+        string[] names = [];
+        string[] labelValues = [];
+        string[] stories = [];
+
+        try
+        {
+            int ret = sapModel.FrameObj.GetLabelNameList(ref numberNames, ref names, ref labelValues, ref stories);
+            if (ret != 0)
+                return labels;
+
+            int count = Math.Min(numberNames, Math.Min(names.Length, labelValues.Length));
+            for (int index = 0; index < count; index++)
+            {
+                string name = (names[index] ?? "").Trim();
+                if (name.Length == 0)
+                    continue;
+
+                labels[name] = (labelValues[index] ?? "").Trim();
+            }
+        }
+        catch
+        {
+            // Labels are optional display/search fields; missing labels do not affect comparison.
+        }
+
+        return labels;
+    }
+
+    private static bool TryGetAllFramesSnapshot(
+        ETABSv1.cSapModel sapModel,
+        IReadOnlyDictionary<string, string> materialBySection,
+        IReadOnlyDictionary<string, List<string>> groupsByFrameName,
+        IReadOnlyDictionary<string, string> frameLabels,
+        List<string> warnings,
+        out List<ModelCompareFrameSnapshot> frames,
+        out int expectedCount)
+    {
+        frames = [];
+        expectedCount = 0;
+
+        int numberNames = 0;
+        string[] names = [];
+        string[] propNames = [];
+        string[] stories = [];
+        string[] pointName1 = [];
+        string[] pointName2 = [];
+        double[] point1X = [];
+        double[] point1Y = [];
+        double[] point1Z = [];
+        double[] point2X = [];
+        double[] point2Y = [];
+        double[] point2Z = [];
+        double[] angle = [];
+        double[] offset1X = [];
+        double[] offset2X = [];
+        double[] offset1Y = [];
+        double[] offset2Y = [];
+        double[] offset1Z = [];
+        double[] offset2Z = [];
+        int[] cardinalPoint = [];
+
+        try
+        {
+            int ret = sapModel.FrameObj.GetAllFrames(
+                ref numberNames,
+                ref names,
+                ref propNames,
+                ref stories,
+                ref pointName1,
+                ref pointName2,
+                ref point1X,
+                ref point1Y,
+                ref point1Z,
+                ref point2X,
+                ref point2Y,
+                ref point2Z,
+                ref angle,
+                ref offset1X,
+                ref offset2X,
+                ref offset1Y,
+                ref offset2Y,
+                ref offset1Z,
+                ref offset2Z,
+                ref cardinalPoint,
+                "Global");
+            if (ret != 0)
+            {
+                warnings.Add($"ETABS bulk frame read (GetAllFrames) returned code {ret}; falling back to per-frame extraction.");
+                return false;
+            }
+        }
+        catch (Exception ex)
+        {
+            warnings.Add("ETABS bulk frame read (GetAllFrames) was unavailable; falling back to per-frame extraction: " + ex.Message);
+            return false;
+        }
+
+        int count = Math.Min(numberNames, names.Length);
+        if (propNames.Length < count ||
+            stories.Length < count ||
+            pointName1.Length < count ||
+            pointName2.Length < count ||
+            point1X.Length < count || point1Y.Length < count || point1Z.Length < count ||
+            point2X.Length < count || point2Y.Length < count || point2Z.Length < count)
+        {
+            warnings.Add("ETABS bulk frame read (GetAllFrames) returned inconsistent array sizes; falling back to per-frame extraction.");
+            return false;
+        }
+
+        var builtFrames = new List<ModelCompareFrameSnapshot>(count);
+        int validNames = 0;
+        for (int index = 0; index < count; index++)
+        {
+            string frameName = (names[index] ?? "").Trim();
+            if (frameName.Length == 0)
+                continue;
+
+            validNames++;
+
+            string pointI = (pointName1[index] ?? "").Trim();
+            string pointJ = (pointName2[index] ?? "").Trim();
+            if (pointI.Length == 0 || pointJ.Length == 0)
+            {
+                warnings.Add($"Frame '{frameName}' was skipped from the model compare snapshot because its endpoint names could not be read.");
+                continue;
+            }
+
+            if (!double.IsFinite(point1X[index]) || !double.IsFinite(point1Y[index]) || !double.IsFinite(point1Z[index]) ||
+                !double.IsFinite(point2X[index]) || !double.IsFinite(point2Y[index]) || !double.IsFinite(point2Z[index]))
+            {
+                warnings.Add($"Frame '{frameName}' was skipped from the model compare snapshot because ETABS returned non-finite endpoint coordinates.");
+                continue;
+            }
+
+            (double X, double Y, double Z) pointICoord = (point1X[index], point1Y[index], point1Z[index]);
+            (double X, double Y, double Z) pointJCoord = (point2X[index], point2Y[index], point2Z[index]);
+            string sectionName = (propNames[index] ?? "").Trim();
+            string materialName = materialBySection.TryGetValue(sectionName, out string? sectionMaterial)
+                ? sectionMaterial
+                : "";
+
+            builtFrames.Add(new ModelCompareFrameSnapshot
+            {
+                FrameName = frameName,
+                Label = frameLabels.TryGetValue(frameName, out string? label) ? label : "",
+                Story = (stories[index] ?? "").Trim(),
+                PointIName = pointI,
+                PointJName = pointJ,
+                IX = pointICoord.X,
+                IY = pointICoord.Y,
+                IZ = pointICoord.Z,
+                JX = pointJCoord.X,
+                JY = pointJCoord.Y,
+                JZ = pointJCoord.Z,
+                Length = CalculateFrameLength(pointICoord, pointJCoord),
+                SectionName = sectionName,
+                MaterialName = materialName,
+                GroupNames = groupsByFrameName.TryGetValue(frameName, out List<string>? groupNames)
+                    ? groupNames.ToList()
+                    : []
+            });
+        }
+
+        frames = builtFrames
+            .OrderBy(frame => frame.FrameName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        expectedCount = validNames;
+        return true;
+    }
+
     private static ModelCompareFrameSnapshot? ReadModelCompareFrameSnapshot(
         ETABSv1.cSapModel sapModel,
         string frameName,
@@ -532,6 +759,7 @@ internal sealed class EtabsSnapshotExtractor
         string areaName,
         IReadOnlyDictionary<string, ModelCompareAreaPropertySnapshot> areaPropertyByName,
         IReadOnlyDictionary<string, List<string>> groupsByAreaName,
+        IReadOnlyDictionary<string, (double X, double Y, double Z)> pointCoordinates,
         List<string> warnings)
     {
         string label = "";
@@ -557,7 +785,7 @@ internal sealed class EtabsSnapshotExtractor
             warnings.Add($"ETABS area property assignment read failed for area '{areaName}': {ex.Message}");
         }
 
-        List<ModelComparePointSnapshot> corners = ReadModelCompareAreaCorners(sapModel, areaName, warnings);
+        List<ModelComparePointSnapshot> corners = ReadModelCompareAreaCorners(sapModel, areaName, pointCoordinates, warnings);
         if (corners.Count < 3)
         {
             warnings.Add($"ETABS area '{areaName}' was skipped in model compare snapshot because fewer than three corner points were readable.");
@@ -581,7 +809,11 @@ internal sealed class EtabsSnapshotExtractor
         };
     }
 
-    private static List<ModelComparePointSnapshot> ReadModelCompareAreaCorners(ETABSv1.cSapModel sapModel, string areaName, List<string> warnings)
+    private static List<ModelComparePointSnapshot> ReadModelCompareAreaCorners(
+        ETABSv1.cSapModel sapModel,
+        string areaName,
+        IReadOnlyDictionary<string, (double X, double Y, double Z)> pointCoordinates,
+        List<string> warnings)
     {
         int numberPoints = 0;
         string[] pointNames = [];
@@ -610,7 +842,9 @@ internal sealed class EtabsSnapshotExtractor
 
             try
             {
-                (double X, double Y, double Z) point = GetPointCoordinates(sapModel, pointName);
+                (double X, double Y, double Z) point = pointCoordinates.TryGetValue(pointName, out (double X, double Y, double Z) cached)
+                    ? cached
+                    : GetPointCoordinates(sapModel, pointName);
                 corners.Add(new ModelComparePointSnapshot
                 {
                     PointName = pointName,
