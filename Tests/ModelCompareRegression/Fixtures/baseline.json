@@ -1,0 +1,88 @@
+{
+  "metadata": {
+    "schemaVersion": 3,
+    "productName": "ETABS Test Fixture",
+    "sourceModelFileName": "baseline.edb",
+    "snapshotCreatedAt": "2026-06-28T00:00:00+08:00",
+    "units": "kN_m_C",
+    "lengthUnit": "m",
+    "forceUnit": "kN",
+    "stressUnit": "MPa",
+    "unitWeightUnit": "kN/m^3",
+    "unitWeightConvention": "Weight per unit volume",
+    "framesReadStatus": "Success",
+    "areasReadStatus": "Success",
+    "framePropertiesReadStatus": "Success",
+    "areaPropertiesReadStatus": "Success",
+    "materialsReadStatus": "Success",
+    "groupsReadStatus": "Success",
+    "extractionWarnings": []
+  },
+  "frames": [
+    {
+      "frameName": "F1",
+      "label": "F1",
+      "story": "Story1",
+      "pointIName": "P1",
+      "pointJName": "P2",
+      "ix": 0,
+      "iy": 0,
+      "iz": 0,
+      "jx": 0,
+      "jy": 0,
+      "jz": 3,
+      "length": 3,
+      "sectionName": "S1",
+      "materialName": "Concrete",
+      "groupNames": ["G1"]
+    }
+  ],
+  "areas": [
+    {
+      "areaName": "A1",
+      "label": "A1",
+      "story": "Story1",
+      "propertyName": "AP1",
+      "materialName": "Concrete",
+      "thickness": 0.2,
+      "corners": [
+        { "pointName": "A1P1", "x": 0, "y": 0, "z": 0 },
+        { "pointName": "A1P2", "x": 4, "y": 0, "z": 0 },
+        { "pointName": "A1P3", "x": 4, "y": 4, "z": 0 },
+        { "pointName": "A1P4", "x": 0, "y": 4, "z": 0 }
+      ],
+      "groupNames": ["G1"]
+    }
+  ],
+  "frameProperties": [
+    {
+      "sectionName": "S1",
+      "sectionType": "Rectangular",
+      "materialName": "Concrete",
+      "depth": 0.4,
+      "width": 0.3,
+      "flangeThickness": 0,
+      "webThickness": 0,
+      "summaryText": "Fixture section"
+    }
+  ],
+  "areaProperties": [
+    {
+      "propertyName": "AP1",
+      "areaType": "Slab",
+      "shellType": "ShellThin",
+      "materialName": "Concrete",
+      "thickness": 0.2
+    }
+  ],
+  "materials": [
+    {
+      "materialName": "Concrete",
+      "materialType": "Concrete",
+      "elasticModulus": 30000,
+      "poissonRatio": 0.2,
+      "unitWeight": 24,
+      "designSummary": "Fixture material"
+    }
+  ]
+}

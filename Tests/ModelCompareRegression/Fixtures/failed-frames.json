@@ -1,0 +1,28 @@
+{
+  "metadata": {
+    "schemaVersion": 3,
+    "productName": "ETABS Failed Frame Fixture",
+    "sourceModelFileName": "failed-frames.edb",
+    "snapshotCreatedAt": "2026-06-28T00:00:00+08:00",
+    "units": "kN_m_C",
+    "lengthUnit": "m",
+    "forceUnit": "kN",
+    "stressUnit": "MPa",
+    "unitWeightUnit": "kN/m^3",
+    "unitWeightConvention": "Weight per unit volume",
+    "framesReadStatus": "Failed",
+    "areasReadStatus": "NotAttempted",
+    "framePropertiesReadStatus": "NotAttempted",
+    "areaPropertiesReadStatus": "NotAttempted",
+    "materialsReadStatus": "NotAttempted",
+    "groupsReadStatus": "NotAttempted",
+    "extractionWarnings": [
+      "Fixture frame list failed to load."
+    ]
+  },
+  "frames": [],
+  "areas": [],
+  "frameProperties": [],
+  "areaProperties": [],
+  "materials": []
+}

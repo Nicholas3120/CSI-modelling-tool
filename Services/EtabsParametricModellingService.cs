@@ -967,86 +967,6 @@ public sealed partial class EtabsParametricModellingService
         return result;
     }
 
-    public ModelCompareSnapshotResult ExtractModelCompareSnapshot(ModelCompareSnapshotRequest request)
-    {
-        var warnings = new List<string>();
-        EtabsInstanceListResult instanceResult = ListEtabsInstances();
-        warnings.AddRange(instanceResult.Warnings);
-
-        List<EtabsInstanceInfo> instances = instanceResult.Instances;
-        string selectedInstanceId = ResolveSelectedInstanceId(instances, request.EtabsInstanceId);
-
-        var result = new ModelCompareSnapshotResult
-        {
-            IsError = instances.Count == 0,
-            Message = instances.Count == 0 ? instanceResult.Message : "",
-            Instances = instances,
-            SelectedInstanceId = selectedInstanceId,
-            Warnings = warnings
-        };
-
-        if (instances.Count == 0)
-            return result;
-
-        try
-        {
-            ETABSv1.cOAPI etabsObject = GetEtabsObject(selectedInstanceId);
-            ETABSv1.cSapModel sapModel = GetRequiredSapModelObject(etabsObject);
-            ETABSv1.eUnits? originalUnits = TryGetPresentUnits(sapModel);
-
-            try
-            {
-                TrySetPresentUnitsToKnM(sapModel, warnings);
-
-                List<ModelCompareFramePropertySnapshot> frameProperties = GetModelCompareFrameProperties(sapModel, warnings);
-                Dictionary<string, string> materialBySection = frameProperties
-                    .Where(section => !string.IsNullOrWhiteSpace(section.SectionName))
-                    .GroupBy(section => section.SectionName, StringComparer.OrdinalIgnoreCase)
-                    .ToDictionary(group => group.Key, group => group.First().MaterialName, StringComparer.OrdinalIgnoreCase);
-
-                Dictionary<string, List<string>> groupsByFrameName = GetModelCompareFrameGroups(sapModel, warnings);
-                List<ModelCompareFrameSnapshot> frames = GetAllFrameNames(sapModel, warnings)
-                    .Select(frameName => ReadModelCompareFrameSnapshot(sapModel, frameName, materialBySection, groupsByFrameName, warnings))
-                    .OrderBy(frame => frame.FrameName, StringComparer.OrdinalIgnoreCase)
-                    .ToList();
-
-                result.Snapshot = new ModelCompareSnapshot
-                {
-                    Metadata = new ModelCompareSnapshotMetadata
-                    {
-                        ProductName = TryGetEtabsProductName(sapModel),
-                        SourceModelFileName = TryGetModelFilename(etabsObject),
-                        SnapshotCreatedAt = DateTimeOffset.Now,
-                        Units = EtabsUnitsKnMC.ToString()
-                    },
-                    Frames = frames,
-                    FrameProperties = frameProperties,
-                    AreaProperties = GetAreaPropertyRows(sapModel, warnings)
-                        .Select(MapModelCompareAreaProperty)
-                        .ToList(),
-                    Materials = GetMaterialPropertyRows(sapModel, warnings)
-                        .Select(MapModelCompareMaterial)
-                        .ToList()
-                };
-
-                result.IsError = false;
-                result.Message = $"Extracted model snapshot with {frames.Count} frame object(s), {frameProperties.Count} frame propertie(s), {result.Snapshot.AreaProperties.Count} area propertie(s), and {result.Snapshot.Materials.Count} material(s).";
-            }
-            finally
-            {
-                if (originalUnits != null)
-                    TryRestorePresentUnits(sapModel, originalUnits.Value);
-            }
-        }
-        catch (Exception ex)
-        {
-            result.IsError = true;
-            result.Message = ex.Message;
-        }
-
-        return result;
-    }
-
     public SteelSectionCatalogResult ListSteelSectionCatalog(SteelSectionCatalogRequest request)
     {
         var warnings = new List<string>();
@@ -4305,91 +4225,6 @@ public sealed partial class EtabsParametricModellingService
         };
     }
 
-    private static ModelCompareFrameSnapshot ReadModelCompareFrameSnapshot(
-        ETABSv1.cSapModel sapModel,
-        string frameName,
-        IReadOnlyDictionary<string, string> materialBySection,
-        IReadOnlyDictionary<string, List<string>> groupsByFrameName,
-        List<string> warnings)
-    {
-        EtabsFrameSectionRow row = ReadFrameSectionRow(sapModel, frameName, warnings);
-        string materialName = materialBySection.TryGetValue(row.CurrentSection, out string? sectionMaterial)
-            ? sectionMaterial
-            : "";
-
-        return new ModelCompareFrameSnapshot
-        {
-            FrameName = row.FrameName,
-            Label = row.Label,
-            Story = row.Story,
-            PointIName = row.PointI,
-            PointJName = row.PointJ,
-            IX = row.IX,
-            IY = row.IY,
-            IZ = row.IZ,
-            JX = row.JX,
-            JY = row.JY,
-            JZ = row.JZ,
-            Length = row.LengthM,
-            SectionName = row.CurrentSection,
-            MaterialName = materialName,
-            GroupNames = groupsByFrameName.TryGetValue(frameName, out List<string>? groupNames)
-                ? groupNames.ToList()
-                : []
-        };
-    }
-
-    private static Dictionary<string, List<string>> GetModelCompareFrameGroups(ETABSv1.cSapModel sapModel, List<string> warnings)
-    {
-        var groupsByFrameName = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (string groupName in GetGroupNames(sapModel, warnings))
-        {
-            int numberItems = 0;
-            int[] objectTypes = [];
-            string[] objectNames = [];
-
-            try
-            {
-                int ret = sapModel.GroupDef.GetAssignments(groupName, ref numberItems, ref objectTypes, ref objectNames);
-                if (ret != 0)
-                {
-                    warnings.Add($"ETABS group '{groupName}' assignments could not be read for model compare snapshot. Return code: {ret}.");
-                    continue;
-                }
-
-                int count = Math.Min(numberItems, Math.Min(objectTypes.Length, objectNames.Length));
-                for (int index = 0; index < count; index++)
-                {
-                    if (objectTypes[index] != EtabsSelectedFrameObjectType)
-                        continue;
-
-                    string frameName = (objectNames[index] ?? "").Trim();
-                    if (frameName.Length == 0)
-                        continue;
-
-                    if (!groupsByFrameName.TryGetValue(frameName, out List<string>? frameGroups))
-                    {
-                        frameGroups = [];
-                        groupsByFrameName[frameName] = frameGroups;
-                    }
-
-                    if (!frameGroups.Contains(groupName, StringComparer.OrdinalIgnoreCase))
-                        frameGroups.Add(groupName);
-                }
-            }
-            catch (Exception ex)
-            {
-                warnings.Add($"ETABS group '{groupName}' assignments could not be read for model compare snapshot: {ex.Message}");
-            }
-        }
-
-        foreach (List<string> frameGroups in groupsByFrameName.Values)
-            frameGroups.Sort(StringComparer.OrdinalIgnoreCase);
-
-        return groupsByFrameName;
-    }
-
     private static TaperedSteelFrameInfo ReadTaperedSteelFrameInfo(ETABSv1.cSapModel sapModel, string frameName)
     {
         string currentSection = "";
@@ -5091,7 +4926,7 @@ public sealed partial class EtabsParametricModellingService
         double R22,
         double R33);
 
-    private static double CalculateFrameLength((double X, double Y, double Z) pointI, (double X, double Y, double Z) pointJ)
+    internal static double CalculateFrameLength((double X, double Y, double Z) pointI, (double X, double Y, double Z) pointJ)
     {
         double dx = pointJ.X - pointI.X;
         double dy = pointJ.Y - pointI.Y;
@@ -5139,7 +4974,7 @@ public sealed partial class EtabsParametricModellingService
         return EtabsNameUtility.BuildSafeName("", $"{safeObjectName}_{exportSuffix}", 60);
     }
 
-    private static List<string> GetFrameSectionNames(ETABSv1.cSapModel sapModel, List<string> warnings)
+    internal static List<string> GetFrameSectionNames(ETABSv1.cSapModel sapModel, List<string> warnings)
     {
         var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
 
@@ -5227,9 +5062,12 @@ public sealed partial class EtabsParametricModellingService
         return names.ToList();
     }
 
-    private static List<EtabsMaterialPropertyRow> GetMaterialPropertyRows(ETABSv1.cSapModel sapModel, List<string> warnings)
+    internal static List<EtabsMaterialPropertyRow> GetMaterialPropertyRows(
+        ETABSv1.cSapModel sapModel,
+        List<string> warnings,
+        IReadOnlyList<string>? materialNames = null)
     {
-        return GetMaterialNames(sapModel, warnings)
+        return (materialNames ?? GetMaterialNames(sapModel, warnings))
             .Select(name =>
             {
                 ETABSv1.eMatType materialType = ETABSv1.eMatType.NoDesign;
@@ -5344,9 +5182,12 @@ public sealed partial class EtabsParametricModellingService
             .ToList();
     }
 
-    private static List<EtabsAreaPropertyRow> GetAreaPropertyRows(ETABSv1.cSapModel sapModel, List<string> warnings)
+    internal static List<EtabsAreaPropertyRow> GetAreaPropertyRows(
+        ETABSv1.cSapModel sapModel,
+        List<string> warnings,
+        IReadOnlyList<string>? areaPropertyNames = null)
     {
-        return GetAreaPropertyNames(sapModel, warnings)
+        return (areaPropertyNames ?? GetAreaPropertyNames(sapModel, warnings))
             .Select(name =>
             {
                 ETABSv1.eSlabType slabType = ETABSv1.eSlabType.Slab;
@@ -5391,79 +5232,6 @@ public sealed partial class EtabsParametricModellingService
             })
             .OrderBy(row => row.Name, StringComparer.OrdinalIgnoreCase)
             .ToList();
-    }
-
-    private static List<ModelCompareFramePropertySnapshot> GetModelCompareFrameProperties(ETABSv1.cSapModel sapModel, List<string> warnings)
-    {
-        return GetFrameSectionNames(sapModel, warnings)
-            .Select(name =>
-            {
-                ETABSv1.eFramePropType propType = ETABSv1.eFramePropType.General;
-                string materialName = "";
-
-                try
-                {
-                    int typeRet = sapModel.PropFrame.GetTypeOAPI(name, ref propType);
-                    if (typeRet != 0)
-                        warnings.Add($"ETABS could not read frame section shape for '{name}' in model compare snapshot. Return code: {typeRet}.");
-                }
-                catch (Exception ex)
-                {
-                    warnings.Add($"ETABS frame section shape read failed for '{name}' in model compare snapshot: {ex.Message}");
-                }
-
-                try
-                {
-                    int matRet = sapModel.PropFrame.GetMaterial(name, ref materialName);
-                    if (matRet != 0)
-                        warnings.Add($"ETABS could not read frame section material for '{name}' in model compare snapshot. Return code: {matRet}.");
-                }
-                catch
-                {
-                    // Imported or auto-select properties may not expose one simple material name.
-                }
-
-                (double Depth, double Width, double FlangeThickness, double WebThickness) dimensions = GetFrameSectionDimensions(sapModel, name, propType);
-
-                return new ModelCompareFramePropertySnapshot
-                {
-                    SectionName = name,
-                    SectionType = FormatFramePropType(propType),
-                    MaterialName = materialName,
-                    Depth = dimensions.Depth,
-                    Width = dimensions.Width,
-                    FlangeThickness = dimensions.FlangeThickness,
-                    WebThickness = dimensions.WebThickness,
-                    SummaryText = GetFrameSectionSummary(sapModel, name)
-                };
-            })
-            .OrderBy(row => row.SectionName, StringComparer.OrdinalIgnoreCase)
-            .ToList();
-    }
-
-    private static ModelCompareAreaPropertySnapshot MapModelCompareAreaProperty(EtabsAreaPropertyRow row)
-    {
-        return new ModelCompareAreaPropertySnapshot
-        {
-            PropertyName = row.Name,
-            AreaType = row.AreaType,
-            ShellType = row.ShellType,
-            MaterialName = row.MaterialName,
-            Thickness = row.Thickness
-        };
-    }
-
-    private static ModelCompareMaterialSnapshot MapModelCompareMaterial(EtabsMaterialPropertyRow row)
-    {
-        return new ModelCompareMaterialSnapshot
-        {
-            MaterialName = row.Name,
-            MaterialType = row.MaterialType,
-            ElasticModulus = row.ElasticModulusMpa,
-            PoissonRatio = row.PoissonRatio,
-            UnitWeight = row.UnitWeightKnPerM3,
-            DesignSummary = row.DesignSummary
-        };
     }
 
     private static List<PlateGirderShellPropertyDefinition> GetPlateGirderShellPropertyDefinitions(
@@ -5583,7 +5351,7 @@ public sealed partial class EtabsParametricModellingService
         return (elasticModulusGpa, yieldStrengthMpa);
     }
 
-    private static (double Depth, double Width, double FlangeThickness, double WebThickness) GetFrameSectionDimensions(
+    internal static (double Depth, double Width, double FlangeThickness, double WebThickness) GetFrameSectionDimensions(
         ETABSv1.cSapModel sapModel,
         string name,
         ETABSv1.eFramePropType propType)
@@ -5711,7 +5479,7 @@ public sealed partial class EtabsParametricModellingService
         return "";
     }
 
-    private static string GetFrameSectionSummary(ETABSv1.cSapModel sapModel, string name)
+    internal static string GetFrameSectionSummary(ETABSv1.cSapModel sapModel, string name)
     {
         try
         {
@@ -5851,7 +5619,7 @@ public sealed partial class EtabsParametricModellingService
             .FirstOrDefault(File.Exists) ?? raw;
     }
 
-    private static string FormatFramePropType(ETABSv1.eFramePropType propType)
+    internal static string FormatFramePropType(ETABSv1.eFramePropType propType)
     {
         return propType switch
         {
@@ -6456,7 +6224,7 @@ public sealed partial class EtabsParametricModellingService
         return [];
     }
 
-    private static List<string> GetGroupNames(ETABSv1.cSapModel sapModel, List<string> warnings)
+    internal static List<string> GetGroupNames(ETABSv1.cSapModel sapModel, List<string> warnings)
     {
         int numberNames = 0;
         string[] names = [];
@@ -7340,7 +7108,7 @@ public sealed partial class EtabsParametricModellingService
         }
     }
 
-    private static (double X, double Y, double Z) GetPointCoordinates(ETABSv1.cSapModel sapModel, string pointName)
+    internal static (double X, double Y, double Z) GetPointCoordinates(ETABSv1.cSapModel sapModel, string pointName)
     {
         double x = 0;
         double y = 0;
@@ -7362,29 +7130,6 @@ public sealed partial class EtabsParametricModellingService
         {
             return null;
         }
-    }
-
-    private static string TryGetEtabsProductName(ETABSv1.cSapModel sapModel)
-    {
-        try
-        {
-            dynamic dynamicSapModel = sapModel;
-            string version = "";
-            int ret = dynamicSapModel.GetVersion(ref version);
-            if (ret == 0 && !string.IsNullOrWhiteSpace(version))
-            {
-                string trimmedVersion = version.Trim();
-                return trimmedVersion.Contains("ETABS", StringComparison.OrdinalIgnoreCase)
-                    ? trimmedVersion
-                    : $"ETABS {trimmedVersion}";
-            }
-        }
-        catch
-        {
-            // Some ETABS API versions do not expose version information through SapModel.
-        }
-
-        return "ETABS";
     }
 
     private static void TrySetPresentUnitsToKnM(ETABSv1.cSapModel sapModel, List<string> warnings)

@@ -4055,11 +4055,17 @@
             <TabItem Header="Model Compare" DataContext="{Binding ModelCompare}">
                 <Grid Margin="12">
                     <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="*"/>
-                        <RowDefinition Height="150"/>
+                        <RowDefinition Height="Auto" MinHeight="60"/>
+                        <RowDefinition Height="5"/>
+                        <RowDefinition Height="Auto" MinHeight="72"/>
+                        <RowDefinition Height="5"/>
+                        <RowDefinition Height="Auto" MinHeight="65"/>
+                        <RowDefinition Height="5"/>
+                        <RowDefinition Height="Auto" MinHeight="80"/>
+                        <RowDefinition Height="5"/>
+                        <RowDefinition Height="*" MinHeight="120"/>
+                        <RowDefinition Height="5"/>
+                        <RowDefinition Height="150" MinHeight="70"/>
                     </Grid.RowDefinitions>
 
                     <GroupBox Header="ETABS Snapshot" Grid.Row="0">
@@ -4103,7 +4109,16 @@
                         </Grid>
                     </GroupBox>
 
-                    <GroupBox Header="Snapshot Files" Grid.Row="1">
+                    <GridSplitter Grid.Row="1"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
+                                  ResizeDirection="Rows"
+                                  ResizeBehavior="PreviousAndNext"
+                                  ShowsPreview="True"
+                                  Background="#CBD5E1"
+                                  Cursor="SizeNS"/>
+
+                    <GroupBox Header="Snapshot Files" Grid.Row="2">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
@@ -4144,7 +4159,51 @@
                         </Grid>
                     </GroupBox>
 
-                    <GroupBox Header="Compare Summary" Grid.Row="2">
+                    <GridSplitter Grid.Row="3"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
+                                  ResizeDirection="Rows"
+                                  ResizeBehavior="PreviousAndNext"
+                                  ShowsPreview="True"
+                                  Background="#CBD5E1"
+                                  Cursor="SizeNS"/>
+
+                    <GroupBox Header="Comparison Tolerances" Grid.Row="4">
+                        <UniformGrid Columns="5">
+                            <StackPanel Margin="0,0,12,0">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Coordinate (mm)"/>
+                                <TextBox Text="{Binding CoordinateToleranceMm, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
+                            </StackPanel>
+                            <StackPanel Margin="0,0,12,0">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Length (mm)"/>
+                                <TextBox Text="{Binding LengthToleranceMm, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
+                            </StackPanel>
+                            <StackPanel Margin="0,0,12,0">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Orientation (deg)"/>
+                                <TextBox Text="{Binding OrientationToleranceDegrees, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
+                            </StackPanel>
+                            <StackPanel Margin="0,0,12,0">
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Moved search (mm)"/>
+                                <TextBox Text="{Binding MovedFrameSearchDistanceMm, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
+                            </StackPanel>
+                            <StackPanel>
+                                <TextBlock Style="{StaticResource FieldLabel}" Text="Minimum moved confidence"/>
+                                <ComboBox ItemsSource="{Binding MovedFrameConfidenceLevels}"
+                                          SelectedItem="{Binding MinimumMovedFrameConfidence}"/>
+                            </StackPanel>
+                        </UniformGrid>
+                    </GroupBox>
+
+                    <GridSplitter Grid.Row="5"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
+                                  ResizeDirection="Rows"
+                                  ResizeBehavior="PreviousAndNext"
+                                  ShowsPreview="True"
+                                  Background="#CBD5E1"
+                                  Cursor="SizeNS"/>
+
+                    <GroupBox Header="Compare Summary" Grid.Row="6">
                         <Grid>
                             <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto"/>
@@ -4175,26 +4234,119 @@
                         </Grid>
                     </GroupBox>
 
-                    <GroupBox Header="Comparison Results" Grid.Row="3">
-                        <DataGrid ItemsSource="{Binding Results}"
-                                  AutoGenerateColumns="False"
-                                  IsReadOnly="True"
-                                  CanUserAddRows="False"
-                                  GridLinesVisibility="Horizontal"
-                                  HeadersVisibility="Column">
-                            <DataGrid.Columns>
-                                <DataGridTextColumn Header="Change" Binding="{Binding ChangeType}" Width="90"/>
-                                <DataGridTextColumn Header="Object" Binding="{Binding ObjectType}" Width="115"/>
-                                <DataGridTextColumn Header="Description / Location" Binding="{Binding ObjectDescription}" Width="*"/>
-                                <DataGridTextColumn Header="Old Value" Binding="{Binding OldValue}" Width="170"/>
-                                <DataGridTextColumn Header="New Value" Binding="{Binding NewValue}" Width="170"/>
-                                <DataGridTextColumn Header="Severity" Binding="{Binding Importance}" Width="90"/>
-                                <DataGridTextColumn Header="Confidence" Binding="{Binding Confidence, StringFormat=0.###}" Width="90"/>
-                            </DataGrid.Columns>
-                        </DataGrid>
+                    <GridSplitter Grid.Row="7"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
+                                  ResizeDirection="Rows"
+                                  ResizeBehavior="PreviousAndNext"
+                                  ShowsPreview="True"
+                                  Background="#CBD5E1"
+                                  Cursor="SizeNS"/>
+
+                    <GroupBox Header="Comparison Results" Grid.Row="8">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Grid Margin="0,0,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="125"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="125"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="125"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="Auto"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="Change" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <ComboBox Grid.Column="1"
+                                          ItemsSource="{Binding ChangeTypeFilterOptions}"
+                                          SelectedItem="{Binding SelectedChangeTypeFilter}"
+                                          Margin="0,0,12,0"/>
+                                <TextBlock Grid.Column="2" Text="Object" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <ComboBox Grid.Column="3"
+                                          ItemsSource="{Binding ObjectTypeFilterOptions}"
+                                          SelectedItem="{Binding SelectedObjectTypeFilter}"
+                                          Margin="0,0,12,0"/>
+                                <TextBlock Grid.Column="4" Text="Confidence" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <ComboBox Grid.Column="5"
+                                          ItemsSource="{Binding ConfidenceFilterOptions}"
+                                          SelectedItem="{Binding SelectedConfidenceFilter}"
+                                          Margin="0,0,12,0"/>
+                                <TextBox Grid.Column="6"
+                                         Text="{Binding ResultSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                         MinWidth="220"
+                                         ToolTip="Search object, section, material, story, or description"
+                                         Margin="0,0,12,0"/>
+                                <Button Grid.Column="7"
+                                        Content="Select highlighted"
+                                        Command="{Binding SelectHighlightedResultsInEtabsCommand}"
+                                        CommandParameter="{Binding SelectedItems, ElementName=ModelCompareResultsGrid}"
+                                        ToolTip="Select highlighted frame and area rows in the connected ETABS model"
+                                        Margin="0,0,12,0"/>
+                                <TextBlock Grid.Column="8"
+                                           Text="{Binding FilteredResultCount, StringFormat=Showing: {0}}"
+                                           VerticalAlignment="Center"/>
+                            </Grid>
+                            <DataGrid x:Name="ModelCompareResultsGrid"
+                                      Grid.Row="1"
+                                      ItemsSource="{Binding FilteredResults}"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="False"
+                                      CanUserAddRows="False"
+                                      SelectionMode="Extended"
+                                      SelectionUnit="FullRow"
+                                      GridLinesVisibility="Horizontal"
+                                      HeadersVisibility="Column">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Change" Binding="{Binding ChangeType}" Width="90" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Object" Binding="{Binding ObjectType}" Width="115" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Description / Location" Binding="{Binding ObjectDescription}" Width="240" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Match" Binding="{Binding MatchMethodText}" Width="120" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Reason" Binding="{Binding MatchReason}" Width="*" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Metrics" Binding="{Binding DiagnosticMetrics}" Width="190" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Old Value" Binding="{Binding OldValue}" Width="145" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="New Value" Binding="{Binding NewValue}" Width="145" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Severity" Binding="{Binding Importance}" Width="90" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Confidence" Binding="{Binding ConfidenceLevel}" Width="90" IsReadOnly="True"/>
+                                    <DataGridTemplateColumn Header="ETABS" Width="75">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <Button Content="Select"
+                                                        Command="{Binding DataContext.SelectResultObjectInEtabsCommand, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                        CommandParameter="{Binding}"
+                                                        ToolTip="Select this frame or area in the connected ETABS model"
+                                                        Margin="2"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                    <DataGridTemplateColumn Header="Review" Width="125">
+                                        <DataGridTemplateColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <ComboBox ItemsSource="{Binding DataContext.ReviewStatusOptions, RelativeSource={RelativeSource AncestorType=DataGrid}}"
+                                                          SelectedItem="{Binding ReviewStatusText, UpdateSourceTrigger=PropertyChanged}"
+                                                          Margin="2"/>
+                                            </DataTemplate>
+                                        </DataGridTemplateColumn.CellTemplate>
+                                    </DataGridTemplateColumn>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </Grid>
                     </GroupBox>
 
-                    <GroupBox Header="Messages" Grid.Row="4">
+                    <GridSplitter Grid.Row="9"
+                                  HorizontalAlignment="Stretch"
+                                  VerticalAlignment="Stretch"
+                                  ResizeDirection="Rows"
+                                  ResizeBehavior="PreviousAndNext"
+                                  ShowsPreview="True"
+                                  Background="#CBD5E1"
+                                  Cursor="SizeNS"/>
+
+                    <GroupBox Header="Messages" Grid.Row="10">
                         <DataGrid ItemsSource="{Binding Messages}"
                                   AutoGenerateColumns="False"
                                   IsReadOnly="True"

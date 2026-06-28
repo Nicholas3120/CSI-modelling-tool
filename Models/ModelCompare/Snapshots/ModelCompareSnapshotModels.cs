@@ -1,0 +1,124 @@
+namespace CSIModellingTools.Models;
+
+public static class ModelCompareSchema
+{
+    public const int CurrentVersion = 3;
+}
+
+public enum ModelCompareSnapshotReadStatus
+{
+    Unknown,
+    NotAttempted,
+    Success,
+    SuccessWithWarnings,
+    Failed
+}
+
+[Serializable]
+public sealed class ModelCompareSnapshot
+{
+    public ModelCompareSnapshotMetadata Metadata { get; set; } = new();
+    public List<ModelCompareFrameSnapshot> Frames { get; set; } = [];
+    public List<ModelCompareAreaObjectSnapshot> Areas { get; set; } = [];
+    public List<ModelCompareFramePropertySnapshot> FrameProperties { get; set; } = [];
+    public List<ModelCompareAreaPropertySnapshot> AreaProperties { get; set; } = [];
+    public List<ModelCompareMaterialSnapshot> Materials { get; set; } = [];
+}
+
+[Serializable]
+public sealed class ModelCompareSnapshotMetadata
+{
+    public int SchemaVersion { get; set; }
+    public string ProductName { get; set; } = "";
+    public string SourceModelFileName { get; set; } = "";
+    public DateTimeOffset SnapshotCreatedAt { get; set; } = DateTimeOffset.Now;
+    public string Units { get; set; } = "";
+    public string LengthUnit { get; set; } = "";
+    public string ForceUnit { get; set; } = "";
+    public string StressUnit { get; set; } = "";
+    public string UnitWeightUnit { get; set; } = "";
+    public string UnitWeightConvention { get; set; } = "";
+    public ModelCompareSnapshotReadStatus FramesReadStatus { get; set; }
+    public ModelCompareSnapshotReadStatus AreasReadStatus { get; set; }
+    public ModelCompareSnapshotReadStatus FramePropertiesReadStatus { get; set; }
+    public ModelCompareSnapshotReadStatus AreaPropertiesReadStatus { get; set; }
+    public ModelCompareSnapshotReadStatus MaterialsReadStatus { get; set; }
+    public ModelCompareSnapshotReadStatus GroupsReadStatus { get; set; }
+    public List<string> ExtractionWarnings { get; set; } = [];
+}
+
+[Serializable]
+public sealed class ModelCompareFrameSnapshot
+{
+    public string FrameName { get; set; } = "";
+    public string Label { get; set; } = "";
+    public string Story { get; set; } = "";
+    public string PointIName { get; set; } = "";
+    public string PointJName { get; set; } = "";
+    public double IX { get; set; }
+    public double IY { get; set; }
+    public double IZ { get; set; }
+    public double JX { get; set; }
+    public double JY { get; set; }
+    public double JZ { get; set; }
+    public double Length { get; set; }
+    public string SectionName { get; set; } = "";
+    public string MaterialName { get; set; } = "";
+    public List<string> GroupNames { get; set; } = [];
+}
+
+[Serializable]
+public sealed class ModelCompareAreaObjectSnapshot
+{
+    public string AreaName { get; set; } = "";
+    public string Label { get; set; } = "";
+    public string Story { get; set; } = "";
+    public string PropertyName { get; set; } = "";
+    public string MaterialName { get; set; } = "";
+    public double Thickness { get; set; }
+    public List<ModelComparePointSnapshot> Corners { get; set; } = [];
+    public List<string> GroupNames { get; set; } = [];
+}
+
+[Serializable]
+public sealed class ModelComparePointSnapshot
+{
+    public string PointName { get; set; } = "";
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double Z { get; set; }
+}
+
+[Serializable]
+public sealed class ModelCompareFramePropertySnapshot
+{
+    public string SectionName { get; set; } = "";
+    public string SectionType { get; set; } = "";
+    public string MaterialName { get; set; } = "";
+    public double Depth { get; set; }
+    public double Width { get; set; }
+    public double FlangeThickness { get; set; }
+    public double WebThickness { get; set; }
+    public string SummaryText { get; set; } = "";
+}
+
+[Serializable]
+public sealed class ModelCompareAreaPropertySnapshot
+{
+    public string PropertyName { get; set; } = "";
+    public string AreaType { get; set; } = "";
+    public string ShellType { get; set; } = "";
+    public string MaterialName { get; set; } = "";
+    public double Thickness { get; set; }
+}
+
+[Serializable]
+public sealed class ModelCompareMaterialSnapshot
+{
+    public string MaterialName { get; set; } = "";
+    public string MaterialType { get; set; } = "";
+    public double ElasticModulus { get; set; }
+    public double PoissonRatio { get; set; }
+    public double UnitWeight { get; set; }
+    public string DesignSummary { get; set; } = "";
+}

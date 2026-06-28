@@ -1,0 +1,31 @@
+{
+  "metadata": {
+    "productName": "ETABS Legacy Fixture",
+    "sourceModelFileName": "legacy.edb",
+    "snapshotCreatedAt": "2026-06-28T00:00:00+08:00",
+    "units": "kN_m_C"
+  },
+  "frames": [
+    {
+      "frameName": "F1",
+      "label": "F1",
+      "story": "Story1",
+      "pointIName": "P1",
+      "pointJName": "P2",
+      "ix": 0,
+      "iy": 0,
+      "iz": 0,
+      "jx": 0,
+      "jy": 0,
+      "jz": 3,
+      "length": 3,
+      "sectionName": "S1",
+      "materialName": "Concrete",
+      "groupNames": []
+    }
+  ],
+  "areas": [],
+  "frameProperties": [],
+  "areaProperties": [],
+  "materials": []
+}
