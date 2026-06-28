@@ -22,7 +22,8 @@ internal static class Program
             ("Area property thickness changed", AreaPropertyThicknessChanged),
             ("Legacy snapshot completeness", LegacySnapshotCompleteness),
             ("Failed frame category refuses frame diff", FailedFrameCategoryRefusesFrameDiff),
-            ("Reversed I/J endpoints match", ReversedEndpointsMatch)
+            ("Reversed I/J endpoints match", ReversedEndpointsMatch),
+            ("Moved matching safety limit", MovedMatchingSafetyLimit)
         ];
 
         int failed = 0;
@@ -183,6 +184,53 @@ internal static class Program
         ModelCompareResultRow row = Single(result.Differences,
             item => item.ObjectType == ModelCompareObjectType.Frame && item.ObjectDescription.Contains("/ section", StringComparison.OrdinalIgnoreCase));
         Equal(ModelCompareMatchMethod.ReversedIJ, row.MatchMethod, "The reversed member should use reversed I/J matching.");
+    }
+
+    private static void MovedMatchingSafetyLimit()
+    {
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        oldSnapshot.Frames = Enumerable.Range(0, 501)
+            .Select(index => BuildFrame($"OLD_{index}", index * 10.0))
+            .ToList();
+        newSnapshot.Frames = Enumerable.Range(0, 500)
+            .Select(index => BuildFrame($"NEW_{index}", 100_000.0 + index * 10.0))
+            .ToList();
+
+        ModelCompareComparisonResult result = Compare(oldSnapshot, newSnapshot);
+
+        True(result.Warnings.Any(warning =>
+                warning.Contains("moved-frame matching was skipped", StringComparison.OrdinalIgnoreCase) &&
+                warning.Contains("250,000", StringComparison.OrdinalIgnoreCase)),
+            "Large unmatched frame sets should produce a clear moved-matching safety warning.");
+        Equal(501, result.Differences.Count(row =>
+            row.ObjectType == ModelCompareObjectType.Frame && row.ChangeType == ModelCompareChangeType.Removed),
+            "All unmatched old frames should remain deleted when moved matching is skipped.");
+        Equal(500, result.Differences.Count(row =>
+            row.ObjectType == ModelCompareObjectType.Frame && row.ChangeType == ModelCompareChangeType.Added),
+            "All unmatched new frames should remain added when moved matching is skipped.");
+        False(result.Differences.Any(row =>
+                row.ObjectType == ModelCompareObjectType.Frame && row.ChangeType == ModelCompareChangeType.Moved),
+            "No near-geometry moved rows should be created after the safety limit is reached.");
+    }
+
+    private static ModelCompareFrameSnapshot BuildFrame(string frameName, double x)
+    {
+        return new ModelCompareFrameSnapshot
+        {
+            FrameName = frameName,
+            Label = frameName,
+            Story = "Story1",
+            IX = x,
+            IY = 0,
+            IZ = 0,
+            JX = x,
+            JY = 0,
+            JZ = 3,
+            Length = 3,
+            SectionName = "S1",
+            MaterialName = "Concrete"
+        };
     }
 
     private static ModelCompareSnapshot Load(string fileName)

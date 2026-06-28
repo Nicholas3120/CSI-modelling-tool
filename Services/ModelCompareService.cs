@@ -5,6 +5,8 @@ namespace CSIModellingTools.Services;
 
 public sealed class ModelCompareService
 {
+    private const long MaxMovedFrameCandidateChecks = 250_000;
+
     public ModelCompareComparisonResult CompareSnapshots(
         ModelCompareSnapshot oldSnapshot,
         ModelCompareSnapshot newSnapshot,
@@ -22,7 +24,7 @@ public sealed class ModelCompareService
 
         if (CanCompareCategory(oldSnapshot.Metadata.FramesReadStatus, newSnapshot.Metadata.FramesReadStatus))
         {
-            CompareFrames(oldSnapshot.Frames, newSnapshot.Frames, settings, framePropertyDataAvailable, results);
+            CompareFrames(oldSnapshot.Frames, newSnapshot.Frames, settings, framePropertyDataAvailable, results, comparison.Warnings);
             AddReadWarningIfNeeded("Frame", oldSnapshot.Metadata.FramesReadStatus, newSnapshot.Metadata.FramesReadStatus, comparison.Warnings);
             if (!framePropertyDataAvailable)
                 comparison.Warnings.Add("Frame material assignment comparison was skipped because frame property completeness is unavailable.");
@@ -130,35 +132,48 @@ public sealed class ModelCompareService
         IReadOnlyList<ModelCompareFrameSnapshot> newFrames,
         ModelCompareToleranceSettings settings,
         bool compareMaterialAssignments,
-        List<ModelCompareResultRow> results)
+        List<ModelCompareResultRow> results,
+        List<string> warnings)
     {
-        List<ModelCompareFrameSnapshot> unmatchedOldFrames = oldFrames
+        List<ModelCompareFrameSnapshot> orderedOldFrames = oldFrames
             .OrderBy(frame => frame.FrameName, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        List<ModelCompareFrameSnapshot> unmatchedNewFrames = newFrames
+        List<ModelCompareFrameSnapshot> orderedNewFrames = newFrames
             .OrderBy(frame => frame.FrameName, StringComparer.OrdinalIgnoreCase)
             .ToList();
+        Dictionary<FramePointBucket, List<int>> newFramesByEndpoint = BuildFrameEndpointLookup(
+            orderedNewFrames,
+            settings.CoordinateTolerance);
+        var matchedOldIndexes = new HashSet<int>();
+        var matchedNewIndexes = new HashSet<int>();
 
-        foreach (ModelCompareFrameSnapshot oldFrame in unmatchedOldFrames.ToList())
+        for (int oldIndex = 0; oldIndex < orderedOldFrames.Count; oldIndex++)
         {
+            ModelCompareFrameSnapshot oldFrame = orderedOldFrames[oldIndex];
             ModelCompareFrameSnapshot? newFrame = null;
             ModelCompareMatchMethod matchMethod = ModelCompareMatchMethod.Unmatched;
-            foreach (ModelCompareFrameSnapshot candidate in unmatchedNewFrames)
+            int matchedNewIndex = -1;
+            foreach (int newIndex in GetExactFrameCandidateIndexes(oldFrame, newFramesByEndpoint, settings.CoordinateTolerance))
             {
+                if (matchedNewIndexes.Contains(newIndex))
+                    continue;
+
+                ModelCompareFrameSnapshot candidate = orderedNewFrames[newIndex];
                 ModelCompareMatchMethod candidateMethod = GetExactFrameMatchMethod(oldFrame, candidate, settings.CoordinateTolerance);
                 if (candidateMethod == ModelCompareMatchMethod.Unmatched)
                     continue;
 
                 newFrame = candidate;
                 matchMethod = candidateMethod;
+                matchedNewIndex = newIndex;
                 break;
             }
 
             if (newFrame == null)
                 continue;
 
-            unmatchedOldFrames.Remove(oldFrame);
-            unmatchedNewFrames.Remove(newFrame);
+            matchedOldIndexes.Add(oldIndex);
+            matchedNewIndexes.Add(matchedNewIndex);
             int resultStart = results.Count;
             CompareMatchedFrame(oldFrame, newFrame, settings, compareMaterialAssignments, results);
             ApplyDiagnostics(results, resultStart, BuildFrameDiagnostics(
@@ -173,14 +188,31 @@ public sealed class ModelCompareService
             ApplyFrameNavigationContext(results, resultStart, oldFrame, newFrame);
         }
 
-        foreach (ModelCompareFrameSnapshot oldFrame in unmatchedOldFrames.ToList())
-        {
-            ModelCompareFrameSnapshot? newFrame = unmatchedNewFrames.FirstOrDefault(candidate => IsSameFrameName(oldFrame, candidate));
-            if (newFrame == null)
-                continue;
+        List<ModelCompareFrameSnapshot> unmatchedOldFrames = orderedOldFrames
+            .Where((_, index) => !matchedOldIndexes.Contains(index))
+            .ToList();
+        List<ModelCompareFrameSnapshot> unmatchedNewFrames = orderedNewFrames
+            .Where((_, index) => !matchedNewIndexes.Contains(index))
+            .ToList();
 
-            unmatchedOldFrames.Remove(oldFrame);
-            unmatchedNewFrames.Remove(newFrame);
+        Dictionary<string, Queue<int>> unmatchedNewFramesByName = BuildFrameNameLookup(unmatchedNewFrames);
+        var sameNameMatchedOldIndexes = new HashSet<int>();
+        var sameNameMatchedNewIndexes = new HashSet<int>();
+        for (int oldIndex = 0; oldIndex < unmatchedOldFrames.Count; oldIndex++)
+        {
+            ModelCompareFrameSnapshot oldFrame = unmatchedOldFrames[oldIndex];
+            string oldFrameName = (oldFrame.FrameName ?? "").Trim();
+            if (oldFrameName.Length == 0 ||
+                !unmatchedNewFramesByName.TryGetValue(oldFrameName, out Queue<int>? matchingIndexes) ||
+                matchingIndexes.Count == 0)
+            {
+                continue;
+            }
+
+            int newIndex = matchingIndexes.Dequeue();
+            ModelCompareFrameSnapshot newFrame = unmatchedNewFrames[newIndex];
+            sameNameMatchedOldIndexes.Add(oldIndex);
+            sameNameMatchedNewIndexes.Add(newIndex);
             int resultStart = results.Count;
             AddFrameMovedDifference(oldFrame, newFrame, settings, ModelCompareConfidenceLevel.High, results);
             CompareMatchedFrame(oldFrame, newFrame, settings, compareMaterialAssignments, results);
@@ -195,7 +227,33 @@ public sealed class ModelCompareService
             ApplyFrameNavigationContext(results, resultStart, oldFrame, newFrame);
         }
 
-        MatchLikelyMovedFrames(unmatchedOldFrames, unmatchedNewFrames, settings, compareMaterialAssignments, results);
+        unmatchedOldFrames = unmatchedOldFrames
+            .Where((_, index) => !sameNameMatchedOldIndexes.Contains(index))
+            .ToList();
+        unmatchedNewFrames = unmatchedNewFrames
+            .Where((_, index) => !sameNameMatchedNewIndexes.Contains(index))
+            .ToList();
+
+        long movedCandidateChecks = (long)unmatchedOldFrames.Count * unmatchedNewFrames.Count;
+        bool movedMatchingSkipped = movedCandidateChecks > MaxMovedFrameCandidateChecks;
+        if (movedMatchingSkipped)
+        {
+            warnings.Add(
+                $"Near-geometry moved-frame matching was skipped because {unmatchedOldFrames.Count} unmatched old frames x " +
+                $"{unmatchedNewFrames.Count} unmatched new frames would require {movedCandidateChecks.ToString("N0", CultureInfo.InvariantCulture)} candidate checks, " +
+                $"exceeding the safety limit of {MaxMovedFrameCandidateChecks.ToString("N0", CultureInfo.InvariantCulture)}. Remaining unmatched frames are reported as added/deleted.");
+        }
+        else
+        {
+            MatchLikelyMovedFrames(unmatchedOldFrames, unmatchedNewFrames, settings, compareMaterialAssignments, results);
+        }
+
+        string unmatchedOldReason = movedMatchingSkipped
+            ? "No exact-coordinate or same-name candidate was found; near-geometry matching was skipped by the candidate safety limit."
+            : "No exact-coordinate, same-name, or unique near-geometry candidate was found in the new snapshot.";
+        string unmatchedNewReason = movedMatchingSkipped
+            ? "No exact-coordinate or same-name candidate was found; near-geometry matching was skipped by the candidate safety limit."
+            : "No exact-coordinate, same-name, or unique near-geometry candidate was found in the old snapshot.";
 
         foreach (ModelCompareFrameSnapshot oldFrame in unmatchedOldFrames)
         {
@@ -207,7 +265,7 @@ public sealed class ModelCompareService
                 oldFrame.FrameName,
                 "",
                 ModelCompareChangeImportance.High,
-                diagnostics: BuildUnmatchedDiagnostics("No exact-coordinate, same-name, or unique near-geometry candidate was found in the new snapshot."),
+                diagnostics: BuildUnmatchedDiagnostics(unmatchedOldReason),
                 searchText: BuildFrameSearchText(oldFrame, null)));
             ApplyFrameNavigationContext(results, resultStart, oldFrame, null);
         }
@@ -222,7 +280,7 @@ public sealed class ModelCompareService
                 "",
                 newFrame.FrameName,
                 ModelCompareChangeImportance.High,
-                diagnostics: BuildUnmatchedDiagnostics("No exact-coordinate, same-name, or unique near-geometry candidate was found in the old snapshot."),
+                diagnostics: BuildUnmatchedDiagnostics(unmatchedNewReason),
                 searchText: BuildFrameSearchText(null, newFrame)));
             ApplyFrameNavigationContext(results, resultStart, null, newFrame);
         }
@@ -519,12 +577,6 @@ public sealed class ModelCompareService
             confidenceLevel));
     }
 
-    private static bool IsSameFrameName(ModelCompareFrameSnapshot oldFrame, ModelCompareFrameSnapshot newFrame)
-    {
-        return !string.IsNullOrWhiteSpace(oldFrame.FrameName) &&
-            string.Equals(oldFrame.FrameName.Trim(), newFrame.FrameName.Trim(), StringComparison.OrdinalIgnoreCase);
-    }
-
     private static ModelCompareMatchMethod GetExactFrameMatchMethod(
         ModelCompareFrameSnapshot oldFrame,
         ModelCompareFrameSnapshot newFrame,
@@ -693,25 +745,109 @@ public sealed class ModelCompareService
         }
     }
 
-    private static Dictionary<string, Queue<ModelCompareFrameSnapshot>> BuildFrameLookup(
-        IEnumerable<ModelCompareFrameSnapshot> frames,
-        ModelCompareToleranceSettings settings)
+    private static Dictionary<FramePointBucket, List<int>> BuildFrameEndpointLookup(
+        IReadOnlyList<ModelCompareFrameSnapshot> frames,
+        double coordinateTolerance)
     {
-        var lookup = new Dictionary<string, Queue<ModelCompareFrameSnapshot>>(StringComparer.Ordinal);
+        var lookup = new Dictionary<FramePointBucket, List<int>>();
 
-        foreach (ModelCompareFrameSnapshot frame in frames.OrderBy(frame => frame.FrameName, StringComparer.OrdinalIgnoreCase))
+        for (int index = 0; index < frames.Count; index++)
         {
-            string key = BuildFrameCoordinateKey(frame, settings.CoordinateTolerance);
-            if (!lookup.TryGetValue(key, out Queue<ModelCompareFrameSnapshot>? queue))
-            {
-                queue = new Queue<ModelCompareFrameSnapshot>();
-                lookup[key] = queue;
-            }
-
-            queue.Enqueue(frame);
+            ModelCompareFrameSnapshot frame = frames[index];
+            FramePointBucket iBucket = BuildFramePointBucket(frame.IX, frame.IY, frame.IZ, coordinateTolerance);
+            FramePointBucket jBucket = BuildFramePointBucket(frame.JX, frame.JY, frame.JZ, coordinateTolerance);
+            AddFrameEndpointIndex(lookup, iBucket, index);
+            if (jBucket != iBucket)
+                AddFrameEndpointIndex(lookup, jBucket, index);
         }
 
         return lookup;
+    }
+
+    private static Dictionary<string, Queue<int>> BuildFrameNameLookup(IReadOnlyList<ModelCompareFrameSnapshot> frames)
+    {
+        var lookup = new Dictionary<string, Queue<int>>(StringComparer.OrdinalIgnoreCase);
+
+        for (int index = 0; index < frames.Count; index++)
+        {
+            string frameName = (frames[index].FrameName ?? "").Trim();
+            if (frameName.Length == 0)
+                continue;
+
+            if (!lookup.TryGetValue(frameName, out Queue<int>? indexes))
+            {
+                indexes = new Queue<int>();
+                lookup[frameName] = indexes;
+            }
+
+            indexes.Enqueue(index);
+        }
+
+        return lookup;
+    }
+
+    private static void AddFrameEndpointIndex(
+        Dictionary<FramePointBucket, List<int>> lookup,
+        FramePointBucket bucket,
+        int frameIndex)
+    {
+        if (!lookup.TryGetValue(bucket, out List<int>? indexes))
+        {
+            indexes = [];
+            lookup[bucket] = indexes;
+        }
+
+        indexes.Add(frameIndex);
+    }
+
+    private static IEnumerable<int> GetExactFrameCandidateIndexes(
+        ModelCompareFrameSnapshot oldFrame,
+        IReadOnlyDictionary<FramePointBucket, List<int>> newFramesByEndpoint,
+        double coordinateTolerance)
+    {
+        FramePointBucket oldIBucket = BuildFramePointBucket(
+            oldFrame.IX,
+            oldFrame.IY,
+            oldFrame.IZ,
+            coordinateTolerance);
+        var candidateIndexes = new HashSet<int>();
+
+        for (long xOffset = -1; xOffset <= 1; xOffset++)
+        {
+            for (long yOffset = -1; yOffset <= 1; yOffset++)
+            {
+                for (long zOffset = -1; zOffset <= 1; zOffset++)
+                {
+                    var bucket = new FramePointBucket(
+                        oldIBucket.X + xOffset,
+                        oldIBucket.Y + yOffset,
+                        oldIBucket.Z + zOffset);
+                    if (!newFramesByEndpoint.TryGetValue(bucket, out List<int>? indexes))
+                        continue;
+
+                    foreach (int index in indexes)
+                        candidateIndexes.Add(index);
+                }
+            }
+        }
+
+        return candidateIndexes.Order();
+    }
+
+    private static FramePointBucket BuildFramePointBucket(double x, double y, double z, double tolerance)
+    {
+        return new FramePointBucket(
+            QuantizeFrameCoordinate(x, tolerance),
+            QuantizeFrameCoordinate(y, tolerance),
+            QuantizeFrameCoordinate(z, tolerance));
+    }
+
+    private static long QuantizeFrameCoordinate(double value, double tolerance)
+    {
+        if (!double.IsFinite(value))
+            return 0;
+
+        return (long)Math.Floor(value / tolerance);
     }
 
     private static Dictionary<string, Queue<ModelCompareAreaObjectSnapshot>> BuildAreaLookup(
@@ -746,16 +882,6 @@ public sealed class ModelCompareService
         return string.Join("|", area.Corners
             .Select(point => BuildPointCoordinateKey(point.X, point.Y, point.Z, tolerance))
             .OrderBy(key => key, StringComparer.Ordinal));
-    }
-
-    private static string BuildFrameCoordinateKey(ModelCompareFrameSnapshot frame, double tolerance)
-    {
-        string iKey = BuildPointCoordinateKey(frame.IX, frame.IY, frame.IZ, tolerance);
-        string jKey = BuildPointCoordinateKey(frame.JX, frame.JY, frame.JZ, tolerance);
-
-        return string.CompareOrdinal(iKey, jKey) <= 0
-            ? $"{iKey}|{jKey}"
-            : $"{jKey}|{iKey}";
     }
 
     private static string BuildPointCoordinateKey(double x, double y, double z, double tolerance)
@@ -1065,6 +1191,8 @@ public sealed class ModelCompareService
         double OrientationDifferenceDegrees,
         double ElevationDifference,
         bool SameSection);
+
+    private readonly record struct FramePointBucket(long X, long Y, long Z);
 
     private sealed record ComparisonDiagnostics(
         ModelCompareMatchMethod MatchMethod,
