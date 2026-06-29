@@ -4365,6 +4365,217 @@
                     </GroupBox>
                 </Grid>
             </TabItem>
+            <TabItem Header="IFC Structural Import" DataContext="{Binding IfcStructuralImport}">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="Auto"/>
+                    </Grid.RowDefinitions>
+
+                    <GroupBox Header="IFC File" Grid.Row="0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="85"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0"
+                                       Style="{StaticResource FieldLabel}"
+                                       Text="IFC file"/>
+                            <TextBox Grid.Column="1"
+                                     Text="{Binding IfcFilePath, UpdateSourceTrigger=PropertyChanged}"/>
+                            <Button Grid.Column="2"
+                                    Content="Browse"
+                                    Command="{Binding BrowseIfcCommand}"/>
+                            <Button Grid.Column="3"
+                                    Content="Run Import"
+                                    Command="{Binding RunImportCommand}"/>
+                            <Button Grid.Column="4"
+                                    Content="Cancel"
+                                    Command="{Binding CancelImportCommand}"/>
+                            <StackPanel Grid.Column="5"
+                                        Orientation="Horizontal"
+                                        VerticalAlignment="Center"
+                                        Margin="6,0,0,0"
+                                        Visibility="{Binding BusyVisibility}">
+                                <ProgressBar Width="120"
+                                             Height="12"
+                                             Minimum="0"
+                                             Maximum="100"
+                                             Value="{Binding ProgressPercent, Mode=OneWay}"
+                                             IsIndeterminate="{Binding IsProgressIndeterminate}"
+                                             VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding ProgressText}"
+                                           Margin="8,0,0,0"
+                                           VerticalAlignment="Center"
+                                           Foreground="#475569"/>
+                            </StackPanel>
+                        </Grid>
+                    </GroupBox>
+
+                    <GroupBox Header="Import Options" Grid.Row="1">
+                        <StackPanel Orientation="Horizontal">
+                            <CheckBox Content="Include beams"
+                                      IsChecked="{Binding IncludeBeams}"
+                                      Margin="0,0,18,0"
+                                      VerticalAlignment="Center"/>
+                            <CheckBox Content="Include columns"
+                                      IsChecked="{Binding IncludeColumns}"
+                                      Margin="0,0,18,0"
+                                      VerticalAlignment="Center"/>
+                            <TextBlock Style="{StaticResource FieldLabel}"
+                                       Text="Node snap (mm)"
+                                       Margin="0,0,6,0"/>
+                            <TextBox Width="90"
+                                     Text="{Binding NodeSnapToleranceMm, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"
+                                     Margin="0,0,18,0"/>
+                            <CheckBox Content="Reset coordinate origin"
+                                      IsChecked="{Binding ResetCoordinateOrigin}"
+                                      VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </GroupBox>
+
+                    <GroupBox Header="Result Summary" Grid.Row="2">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <UniformGrid Grid.Row="0"
+                                         Grid.Column="0"
+                                         Columns="3">
+                                <TextBlock Text="{Binding ImportedCount, StringFormat=Imported: {0}}"
+                                           FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding SkippedCount, StringFormat=Skipped: {0}}"
+                                           FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding WarningCount, StringFormat=Warnings: {0}}"
+                                           FontWeight="SemiBold"/>
+                            </UniformGrid>
+                            <StackPanel Grid.Row="0"
+                                        Grid.Column="1"
+                                        Orientation="Horizontal">
+                                <Button Content="Export JSON"
+                                        Command="{Binding ExportJsonCommand}"/>
+                                <Button Content="Open JSON"
+                                        Command="{Binding OpenJsonCommand}"/>
+                                <Button Content="Export Report"
+                                        Command="{Binding ExportReportCommand}"/>
+                                <Button Content="Open Report"
+                                        Command="{Binding OpenReportCommand}"/>
+                            </StackPanel>
+                            <TextBlock Grid.Row="1"
+                                       Grid.ColumnSpan="2"
+                                       Text="{Binding OperationStatus}"
+                                       Foreground="#475569"
+                                       Margin="0,8,0,0"
+                                       TextTrimming="CharacterEllipsis"/>
+                        </Grid>
+                    </GroupBox>
+
+                    <Grid Grid.Row="3">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="10"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <GroupBox Header="Warnings" Grid.Column="0">
+                            <DataGrid ItemsSource="{Binding Warnings}"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      CanUserAddRows="False"
+                                      GridLinesVisibility="Horizontal"
+                                      HeadersVisibility="Column">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Severity" Binding="{Binding Severity}" Width="85"/>
+                                    <DataGridTextColumn Header="Category" Binding="{Binding Category}" Width="105"/>
+                                    <DataGridTextColumn Header="Source" Binding="{Binding SourceName}" Width="150"/>
+                                    <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+
+                        <GroupBox Header="Skipped Elements" Grid.Column="2">
+                            <DataGrid ItemsSource="{Binding SkippedElements}"
+                                      AutoGenerateColumns="False"
+                                      IsReadOnly="True"
+                                      CanUserAddRows="False"
+                                      GridLinesVisibility="Horizontal"
+                                      HeadersVisibility="Column">
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="IFC Type" Binding="{Binding IfcType}" Width="95"/>
+                                    <DataGridTextColumn Header="Source" Binding="{Binding SourceName}" Width="150"/>
+                                    <DataGridTextColumn Header="Reason" Binding="{Binding Reason}" Width="*"/>
+                                </DataGrid.Columns>
+                            </DataGrid>
+                        </GroupBox>
+                    </Grid>
+
+                    <GroupBox Header="ETABS Export" Grid.Row="4">
+                        <Grid MinHeight="130">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="360"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0"
+                                    Content="Refresh ETABS Instances"
+                                    Command="{Binding RefreshEtabsInstancesCommand}"/>
+                            <ComboBox Grid.Column="1"
+                                      ItemsSource="{Binding EtabsInstances}"
+                                      SelectedItem="{Binding SelectedEtabsInstance}"
+                                      DisplayMemberPath="DisplayName"/>
+                            <Button Grid.Column="2"
+                                    Content="Export to ETABS"
+                                    Command="{Binding ExportToEtabsCommand}"/>
+                            <ProgressBar Grid.Column="3"
+                                         Width="110"
+                                         Height="10"
+                                         HorizontalAlignment="Left"
+                                         IsIndeterminate="True"
+                                         Visibility="{Binding BusyVisibility}"/>
+                            <WrapPanel Grid.Row="1"
+                                       Grid.ColumnSpan="4"
+                                       Margin="0,8,0,0">
+                                <CheckBox Content="Export medium confidence"
+                                          IsChecked="{Binding ExportMediumConfidenceToEtabs}"
+                                          Margin="0,0,18,0"
+                                          VerticalAlignment="Center"/>
+                                <CheckBox Content="Use default section for unknown"
+                                          IsChecked="{Binding UseDefaultSectionForUnknown}"
+                                          Margin="0,0,18,0"
+                                          VerticalAlignment="Center"/>
+                                <CheckBox Content="Use default material for unknown"
+                                          IsChecked="{Binding UseDefaultMaterialForUnknown}"
+                                          VerticalAlignment="Center"/>
+                            </WrapPanel>
+                            <TextBlock Grid.Row="2"
+                                       Grid.ColumnSpan="4"
+                                       Text="{Binding EtabsExportStatus}"
+                                       Foreground="#475569"
+                                       Margin="0,8,0,0"
+                                       TextWrapping="Wrap"/>
+                        </Grid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
         </TabControl>
     </DockPanel>
 </Window>

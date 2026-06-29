@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Input;
+using CSIModellingTools.Features.IfcImport;
 using CSIModellingTools.Models;
 using CSIModellingTools.Services;
 
@@ -143,6 +144,7 @@ public sealed class ParametricModellingViewModel : ObservableObject
         LoadCaseCombination = new LoadCaseCombinationViewModel();
         SectionProperty = new SectionPropertyViewModel();
         ModelCompare = new ModelCompareViewModel();
+        IfcStructuralImport = new IfcStructuralImportViewModel();
         RefreshEtabsInstancesCommand = new RelayCommand(_ => RefreshEtabsInstances());
         ReadEtabsDataCommand = new RelayCommand(_ => ReadEtabsData());
         ReadSelectedPointsCommand = new RelayCommand(_ => ReadSelectedPoints());
@@ -177,6 +179,7 @@ public sealed class ParametricModellingViewModel : ObservableObject
     public LoadCaseCombinationViewModel LoadCaseCombination { get; }
     public SectionPropertyViewModel SectionProperty { get; }
     public ModelCompareViewModel ModelCompare { get; }
+    public IfcStructuralImportViewModel IfcStructuralImport { get; }
 
     public IReadOnlyList<string> TrussTypes { get; } =
     [
