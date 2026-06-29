@@ -1020,6 +1020,11 @@ public sealed class ModelCompareService
         string newName = (newFrame?.FrameName ?? "").Trim();
         string oldLocation = oldFrame == null ? "" : FormatFrameLocation(oldFrame);
         string newLocation = newFrame == null ? "" : FormatFrameLocation(newFrame);
+        ModelCompareFrameSnapshot? referenceFrame = newFrame ?? oldFrame;
+        ModelCompareMemberType memberType = referenceFrame == null
+            ? ModelCompareMemberType.Other
+            : ClassifyFrameMemberType(referenceFrame);
+        string story = (referenceFrame?.Story ?? "").Trim();
 
         for (int index = startIndex; index < results.Count; index++)
         {
@@ -1027,7 +1032,29 @@ public sealed class ModelCompareService
             results[index].NewEtabsObjectName = newName;
             results[index].OldObjectLocation = oldLocation;
             results[index].NewObjectLocation = newLocation;
+            results[index].MemberType = memberType;
+            results[index].Story = story;
         }
+    }
+
+    private static ModelCompareMemberType ClassifyFrameMemberType(ModelCompareFrameSnapshot frame)
+    {
+        double dx = frame.JX - frame.IX;
+        double dy = frame.JY - frame.IY;
+        double dz = frame.JZ - frame.IZ;
+        double horizontal = Math.Sqrt(dx * dx + dy * dy);
+        double vertical = Math.Abs(dz);
+        if (horizontal + vertical <= 1e-9)
+            return ModelCompareMemberType.Other;
+
+        // Angle measured from the horizontal plane: ~0 deg is a beam, ~90 deg is a column.
+        const double toleranceDegrees = 15.0;
+        double angleFromHorizontal = Math.Atan2(vertical, horizontal) * 180.0 / Math.PI;
+        if (angleFromHorizontal >= 90.0 - toleranceDegrees)
+            return ModelCompareMemberType.Column;
+        if (angleFromHorizontal <= toleranceDegrees)
+            return ModelCompareMemberType.Beam;
+        return ModelCompareMemberType.Brace;
     }
 
     private static void ApplyAreaNavigationContext(
@@ -1040,6 +1067,7 @@ public sealed class ModelCompareService
         string newName = (newArea?.AreaName ?? "").Trim();
         string oldLocation = oldArea == null ? "" : FormatAreaLocation(oldArea);
         string newLocation = newArea == null ? "" : FormatAreaLocation(newArea);
+        string story = ((newArea ?? oldArea)?.Story ?? "").Trim();
 
         for (int index = startIndex; index < results.Count; index++)
         {
@@ -1047,6 +1075,8 @@ public sealed class ModelCompareService
             results[index].NewEtabsObjectName = newName;
             results[index].OldObjectLocation = oldLocation;
             results[index].NewObjectLocation = newLocation;
+            results[index].MemberType = ModelCompareMemberType.Area;
+            results[index].Story = story;
         }
     }
 

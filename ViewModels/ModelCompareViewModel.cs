@@ -33,12 +33,15 @@ public sealed class ModelCompareViewModel : ObservableObject
     private string _selectedChangeTypeFilter = "All";
     private string _selectedObjectTypeFilter = "All";
     private string _selectedConfidenceFilter = "All";
+    private string _selectedMemberTypeFilter = "All";
+    private string _selectedStoryFilter = "All";
+    private bool _hideReviewedAndIgnored;
     private string _resultSearchText = "";
 
     public ModelCompareViewModel()
     {
-        FilteredResults = CollectionViewSource.GetDefaultView(Results);
-        FilteredResults.Filter = FilterResult;
+        FilteredResults = CollectionViewSource.GetDefaultView(ObjectResults);
+        FilteredResults.Filter = FilterObjectResult;
         RefreshEtabsInstancesCommand = new RelayCommand(_ => RefreshEtabsInstances(), _ => !IsBusy);
         CreateEtabsSnapshotCommand = new RelayCommand(_ => CreateEtabsSnapshot(), _ => !IsBusy);
         BrowseOldSnapshotCommand = new RelayCommand(_ => BrowseOldSnapshot(), _ => !IsBusy);
@@ -52,6 +55,7 @@ public sealed class ModelCompareViewModel : ObservableObject
 
     public ObservableCollection<EtabsInstanceInfo> EtabsInstances { get; } = [];
     public ObservableCollection<ModelCompareResultRowViewModel> Results { get; } = [];
+    public ObservableCollection<ModelCompareObjectResultViewModel> ObjectResults { get; } = [];
     public ObservableCollection<ValidationIssue> Messages { get; } = [];
     public ICollectionView FilteredResults { get; }
     public IReadOnlyList<ModelCompareConfidenceLevel> MovedFrameConfidenceLevels { get; } = Enum.GetValues<ModelCompareConfidenceLevel>();
@@ -59,6 +63,8 @@ public sealed class ModelCompareViewModel : ObservableObject
     public IReadOnlyList<string> ChangeTypeFilterOptions { get; } = ["All", .. Enum.GetNames<ModelCompareChangeType>()];
     public IReadOnlyList<string> ObjectTypeFilterOptions { get; } = ["All", .. Enum.GetNames<ModelCompareObjectType>()];
     public IReadOnlyList<string> ConfidenceFilterOptions { get; } = ["All", .. Enum.GetNames<ModelCompareConfidenceLevel>()];
+    public IReadOnlyList<string> MemberTypeFilterOptions { get; } = ["All", "Beam", "Column", "Brace", "Area", "Other"];
+    public ObservableCollection<string> StoryFilterOptions { get; } = ["All"];
 
     public ICommand RefreshEtabsInstancesCommand { get; }
     public ICommand CreateEtabsSnapshotCommand { get; }
@@ -226,6 +232,36 @@ public sealed class ModelCompareViewModel : ObservableObject
         }
     }
 
+    public string SelectedMemberTypeFilter
+    {
+        get => _selectedMemberTypeFilter;
+        set
+        {
+            if (SetProperty(ref _selectedMemberTypeFilter, value ?? "All"))
+                RefreshResultFilter();
+        }
+    }
+
+    public string SelectedStoryFilter
+    {
+        get => _selectedStoryFilter;
+        set
+        {
+            if (SetProperty(ref _selectedStoryFilter, value ?? "All"))
+                RefreshResultFilter();
+        }
+    }
+
+    public bool HideReviewedAndIgnored
+    {
+        get => _hideReviewedAndIgnored;
+        set
+        {
+            if (SetProperty(ref _hideReviewedAndIgnored, value))
+                RefreshResultFilter();
+        }
+    }
+
     public string ResultSearchText
     {
         get => _resultSearchText;
@@ -359,6 +395,8 @@ public sealed class ModelCompareViewModel : ObservableObject
                 _newSnapshot,
                 BuildToleranceSettings());
             ReplaceCollection(Results, comparison.Differences.Select(row => new ModelCompareResultRowViewModel(row)));
+            ReplaceObjectResults(BuildObjectResults(Results));
+            RebuildStoryFilterOptions();
             RefreshSummaryCounts();
             RefreshResultFilter();
             warnings.AddRange(comparison.Warnings);
@@ -376,25 +414,22 @@ public sealed class ModelCompareViewModel : ObservableObject
     private bool CanSelectResultObjectInEtabs(object? parameter)
     {
         return !IsBusy &&
-            parameter is ModelCompareResultRowViewModel row &&
-            row.ObjectType is ModelCompareObjectType.Frame or ModelCompareObjectType.Area;
+            parameter is ModelCompareObjectResultViewModel result &&
+            result.IsSelectableInEtabs;
     }
 
     private void SelectResultObjectInEtabs(object? parameter)
     {
-        if (parameter is not ModelCompareResultRowViewModel row ||
-            row.ObjectType is not (ModelCompareObjectType.Frame or ModelCompareObjectType.Area))
-        {
+        if (parameter is not ModelCompareObjectResultViewModel result || !result.IsSelectableInEtabs)
             return;
-        }
 
-        SelectResultsInEtabs([row]);
+        SelectResultsInEtabs(result.Rows.ToList());
     }
 
     private void SelectHighlightedResultsInEtabs(object? parameter)
     {
         List<ModelCompareResultRowViewModel> rows = parameter is IList selectedItems
-            ? selectedItems.Cast<object>().OfType<ModelCompareResultRowViewModel>().ToList()
+            ? selectedItems.Cast<object>().OfType<ModelCompareObjectResultViewModel>().SelectMany(result => result.Rows).ToList()
             : [];
 
         if (rows.Count == 0)
@@ -611,29 +646,49 @@ public sealed class ModelCompareViewModel : ObservableObject
     private void ClearComparisonResults()
     {
         Results.Clear();
+        ReplaceObjectResults([]);
+        RebuildStoryFilterOptions();
         RefreshSummaryCounts();
         RefreshResultFilter();
     }
 
-    private bool FilterResult(object item)
+    private bool FilterObjectResult(object item)
     {
-        if (item is not ModelCompareResultRowViewModel row)
+        if (item is not ModelCompareObjectResultViewModel result)
             return false;
 
-        if (!string.Equals(SelectedChangeTypeFilter, "All", StringComparison.OrdinalIgnoreCase) &&
-            (!Enum.TryParse(SelectedChangeTypeFilter, true, out ModelCompareChangeType changeType) || row.ChangeType != changeType))
+        if (HideReviewedAndIgnored &&
+            result.ReviewStatus is ModelCompareReviewStatus.Reviewed or ModelCompareReviewStatus.Ignored)
         {
             return false;
         }
 
-        if (!string.Equals(SelectedObjectTypeFilter, "All", StringComparison.OrdinalIgnoreCase) &&
-            (!Enum.TryParse(SelectedObjectTypeFilter, true, out ModelCompareObjectType objectType) || row.ObjectType != objectType))
+        if (!IsAllFilter(SelectedChangeTypeFilter) &&
+            (!Enum.TryParse(SelectedChangeTypeFilter, true, out ModelCompareChangeType changeType) || result.PrimaryChangeType != changeType))
         {
             return false;
         }
 
-        if (!string.Equals(SelectedConfidenceFilter, "All", StringComparison.OrdinalIgnoreCase) &&
-            (!Enum.TryParse(SelectedConfidenceFilter, true, out ModelCompareConfidenceLevel confidence) || row.ConfidenceLevel != confidence))
+        if (!IsAllFilter(SelectedObjectTypeFilter) &&
+            (!Enum.TryParse(SelectedObjectTypeFilter, true, out ModelCompareObjectType objectType) || result.ObjectType != objectType))
+        {
+            return false;
+        }
+
+        if (!IsAllFilter(SelectedConfidenceFilter) &&
+            (!Enum.TryParse(SelectedConfidenceFilter, true, out ModelCompareConfidenceLevel confidence) || result.ConfidenceLevel != confidence))
+        {
+            return false;
+        }
+
+        if (!IsAllFilter(SelectedMemberTypeFilter) &&
+            (!Enum.TryParse(SelectedMemberTypeFilter, true, out ModelCompareMemberType memberType) || result.MemberType != memberType))
+        {
+            return false;
+        }
+
+        if (!IsAllFilter(SelectedStoryFilter) &&
+            !string.Equals(result.StoryGroup, SelectedStoryFilter, StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
@@ -642,24 +697,106 @@ public sealed class ModelCompareViewModel : ObservableObject
         if (search.Length == 0)
             return true;
 
-        string searchableText = string.Join(" ",
-            row.ObjectDescription,
-            row.OldValue,
-            row.NewValue,
-            row.MatchReason,
-            row.MatchMethodText,
-            row.SearchText,
-            row.ChangeType.ToString(),
-            row.ObjectType.ToString(),
-            row.ConfidenceLevel.ToString());
-
-        return searchableText.Contains(search, StringComparison.OrdinalIgnoreCase);
+        return result.SearchText.Contains(search, StringComparison.OrdinalIgnoreCase);
     }
+
+    private static bool IsAllFilter(string value) => string.Equals(value, "All", StringComparison.OrdinalIgnoreCase);
 
     private void RefreshResultFilter()
     {
         FilteredResults.Refresh();
         OnPropertyChanged(nameof(FilteredResultCount));
+    }
+
+    private static List<ModelCompareObjectResultViewModel> BuildObjectResults(IEnumerable<ModelCompareResultRowViewModel> rows)
+    {
+        var orderedGroups = new List<List<ModelCompareResultRowViewModel>>();
+        var indexByKey = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (ModelCompareResultRowViewModel row in rows)
+        {
+            string key = BuildObjectKey(row);
+            if (!indexByKey.TryGetValue(key, out int index))
+            {
+                index = orderedGroups.Count;
+                indexByKey[key] = index;
+                orderedGroups.Add([]);
+            }
+
+            orderedGroups[index].Add(row);
+        }
+
+        var objects = new List<ModelCompareObjectResultViewModel>(orderedGroups.Count);
+        foreach (List<ModelCompareResultRowViewModel> groupRows in orderedGroups)
+        {
+            ModelCompareResultRowViewModel first = groupRows[0];
+            bool isFrameOrArea = first.ObjectType is ModelCompareObjectType.Frame or ModelCompareObjectType.Area;
+            string name = isFrameOrArea
+                ? (string.IsNullOrWhiteSpace(first.NewEtabsObjectName) ? first.OldEtabsObjectName : first.NewEtabsObjectName)
+                : ObjectDescriptionHead(first.ObjectDescription);
+            string location = isFrameOrArea
+                ? (string.IsNullOrWhiteSpace(first.NewObjectLocation) ? first.OldObjectLocation : first.NewObjectLocation)
+                : "";
+
+            objects.Add(new ModelCompareObjectResultViewModel(
+                first.ObjectType,
+                first.MemberType,
+                first.Story,
+                name,
+                location,
+                groupRows));
+        }
+
+        return objects;
+    }
+
+    private static string BuildObjectKey(ModelCompareResultRowViewModel row)
+    {
+        if (row.ObjectType is ModelCompareObjectType.Frame or ModelCompareObjectType.Area)
+            return $"{(int)row.ObjectType}|{row.OldEtabsObjectName.Trim()}|{row.NewEtabsObjectName.Trim()}";
+
+        return $"{(int)row.ObjectType}|{ObjectDescriptionHead(row.ObjectDescription)}";
+    }
+
+    private static string ObjectDescriptionHead(string description)
+    {
+        int index = description.IndexOf(" / ", StringComparison.Ordinal);
+        return (index >= 0 ? description[..index] : description).Trim();
+    }
+
+    private void ReplaceObjectResults(IReadOnlyList<ModelCompareObjectResultViewModel> values)
+    {
+        foreach (ModelCompareObjectResultViewModel existing in ObjectResults)
+            existing.PropertyChanged -= OnObjectResultPropertyChanged;
+
+        ObjectResults.Clear();
+        foreach (ModelCompareObjectResultViewModel value in values)
+        {
+            value.PropertyChanged += OnObjectResultPropertyChanged;
+            ObjectResults.Add(value);
+        }
+    }
+
+    private void OnObjectResultPropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (HideReviewedAndIgnored && e.PropertyName == nameof(ModelCompareObjectResultViewModel.ReviewStatus))
+            RefreshResultFilter();
+    }
+
+    private void RebuildStoryFilterOptions()
+    {
+        List<string> stories = ObjectResults
+            .Select(result => result.StoryGroup)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(story => story, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var options = new List<string> { "All" };
+        options.AddRange(stories);
+        ReplaceCollection(StoryFilterOptions, options);
+
+        if (!options.Any(option => string.Equals(option, SelectedStoryFilter, StringComparison.OrdinalIgnoreCase)))
+            SelectedStoryFilter = "All";
     }
 
     private ModelCompareToleranceSettings BuildToleranceSettings()

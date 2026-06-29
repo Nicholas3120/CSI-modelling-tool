@@ -21,6 +21,8 @@ public sealed class ModelCompareResultRowViewModel : ModelCompareResultRow, INot
 
         ChangeType = row.ChangeType;
         ObjectType = row.ObjectType;
+        MemberType = row.MemberType;
+        Story = row.Story;
         ObjectDescription = row.ObjectDescription;
         OldValue = row.OldValue;
         NewValue = row.NewValue;

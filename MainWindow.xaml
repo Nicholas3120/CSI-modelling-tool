@@ -4253,48 +4253,48 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="*"/>
                             </Grid.RowDefinitions>
-                            <Grid Margin="0,0,0,8">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="125"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="125"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="125"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Grid.Column="0" Text="Change" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                <ComboBox Grid.Column="1"
+                            <WrapPanel Margin="0,0,0,8">
+                                <TextBlock Text="Change" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <ComboBox Width="105"
                                           ItemsSource="{Binding ChangeTypeFilterOptions}"
                                           SelectedItem="{Binding SelectedChangeTypeFilter}"
-                                          Margin="0,0,12,0"/>
-                                <TextBlock Grid.Column="2" Text="Object" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                <ComboBox Grid.Column="3"
+                                          Margin="0,0,12,4"/>
+                                <TextBlock Text="Object" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <ComboBox Width="120"
                                           ItemsSource="{Binding ObjectTypeFilterOptions}"
                                           SelectedItem="{Binding SelectedObjectTypeFilter}"
-                                          Margin="0,0,12,0"/>
-                                <TextBlock Grid.Column="4" Text="Confidence" VerticalAlignment="Center" Margin="0,0,6,0"/>
-                                <ComboBox Grid.Column="5"
+                                          Margin="0,0,12,4"/>
+                                <TextBlock Text="Member" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <ComboBox Width="95"
+                                          ItemsSource="{Binding MemberTypeFilterOptions}"
+                                          SelectedItem="{Binding SelectedMemberTypeFilter}"
+                                          Margin="0,0,12,4"/>
+                                <TextBlock Text="Story" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <ComboBox Width="120"
+                                          ItemsSource="{Binding StoryFilterOptions}"
+                                          SelectedItem="{Binding SelectedStoryFilter}"
+                                          Margin="0,0,12,4"/>
+                                <TextBlock Text="Confidence" VerticalAlignment="Center" Margin="0,0,6,0"/>
+                                <ComboBox Width="95"
                                           ItemsSource="{Binding ConfidenceFilterOptions}"
                                           SelectedItem="{Binding SelectedConfidenceFilter}"
-                                          Margin="0,0,12,0"/>
-                                <TextBox Grid.Column="6"
+                                          Margin="0,0,12,4"/>
+                                <TextBox Width="200"
                                          Text="{Binding ResultSearchText, UpdateSourceTrigger=PropertyChanged}"
-                                         MinWidth="220"
-                                         ToolTip="Search object, section, material, story, or description"
-                                         Margin="0,0,12,0"/>
-                                <Button Grid.Column="7"
-                                        Content="Select highlighted"
+                                         ToolTip="Search object, section, material, story, or summary"
+                                         Margin="0,0,12,4"/>
+                                <CheckBox Content="Hide reviewed/ignored"
+                                          IsChecked="{Binding HideReviewedAndIgnored}"
+                                          VerticalAlignment="Center"
+                                          Margin="0,0,12,4"/>
+                                <Button Content="Select highlighted"
                                         Command="{Binding SelectHighlightedResultsInEtabsCommand}"
                                         CommandParameter="{Binding SelectedItems, ElementName=ModelCompareResultsGrid}"
-                                        ToolTip="Select highlighted frame and area rows in the connected ETABS model"
-                                        Margin="0,0,12,0"/>
-                                <TextBlock Grid.Column="8"
-                                           Text="{Binding FilteredResultCount, StringFormat=Showing: {0}}"
+                                        ToolTip="Select highlighted frame and area objects in the connected ETABS model"
+                                        Margin="0,0,12,4"/>
+                                <TextBlock Text="{Binding FilteredResultCount, StringFormat=Showing: {0}}"
                                            VerticalAlignment="Center"/>
-                            </Grid>
+                            </WrapPanel>
                             <DataGrid x:Name="ModelCompareResultsGrid"
                                       Grid.Row="1"
                                       ItemsSource="{Binding FilteredResults}"
@@ -4304,19 +4304,30 @@
                                       SelectionMode="Extended"
                                       SelectionUnit="FullRow"
                                       GridLinesVisibility="Horizontal"
-                                      HeadersVisibility="Column">
+                                      HeadersVisibility="Column"
+                                      HorizontalScrollBarVisibility="Auto"
+                                      EnableRowVirtualization="True"
+                                      VirtualizingPanel.IsVirtualizing="True"
+                                      VirtualizingPanel.VirtualizationMode="Recycling"
+                                      ScrollViewer.CanContentScroll="True"
+                                      RowDetailsVisibilityMode="Collapsed">
                                 <DataGrid.Columns>
-                                    <DataGridTextColumn Header="Change" Binding="{Binding ChangeType}" Width="90" IsReadOnly="True"/>
-                                    <DataGridTextColumn Header="Object" Binding="{Binding ObjectType}" Width="115" IsReadOnly="True"/>
-                                    <DataGridTextColumn Header="Description / Location" Binding="{Binding ObjectDescription}" Width="240" IsReadOnly="True"/>
-                                    <DataGridTextColumn Header="Match" Binding="{Binding MatchMethodText}" Width="120" IsReadOnly="True"/>
-                                    <DataGridTextColumn Header="Reason" Binding="{Binding MatchReason}" Width="*" IsReadOnly="True"/>
-                                    <DataGridTextColumn Header="Metrics" Binding="{Binding DiagnosticMetrics}" Width="190" IsReadOnly="True"/>
-                                    <DataGridTextColumn Header="Old Value" Binding="{Binding OldValue}" Width="145" IsReadOnly="True"/>
-                                    <DataGridTextColumn Header="New Value" Binding="{Binding NewValue}" Width="145" IsReadOnly="True"/>
-                                    <DataGridTextColumn Header="Severity" Binding="{Binding Importance}" Width="90" IsReadOnly="True"/>
-                                    <DataGridTextColumn Header="Confidence" Binding="{Binding ConfidenceLevel}" Width="90" IsReadOnly="True"/>
-                                    <DataGridTemplateColumn Header="ETABS" Width="75">
+                                    <DataGridTextColumn Header="Change" Binding="{Binding PrimaryChangeType}" Width="80" MinWidth="70" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Type" Binding="{Binding ObjectTypeText}" Width="105" MinWidth="90" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Member" Binding="{Binding MemberTypeText}" Width="90" MinWidth="80" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Story" Binding="{Binding Story}" Width="95" MinWidth="80" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Object" Binding="{Binding ObjectName}" Width="180" MinWidth="120" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="What changed" Binding="{Binding ChangeSummary}" Width="*" MinWidth="240" IsReadOnly="True">
+                                        <DataGridTextColumn.ElementStyle>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="TextWrapping" Value="Wrap"/>
+                                                <Setter Property="VerticalAlignment" Value="Center"/>
+                                            </Style>
+                                        </DataGridTextColumn.ElementStyle>
+                                    </DataGridTextColumn>
+                                    <DataGridTextColumn Header="Severity" Binding="{Binding Importance}" Width="85" MinWidth="70" IsReadOnly="True"/>
+                                    <DataGridTextColumn Header="Confidence" Binding="{Binding ConfidenceLevel}" Width="95" MinWidth="80" IsReadOnly="True"/>
+                                    <DataGridTemplateColumn Header="ETABS" Width="90" MinWidth="85">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
                                                 <Button Content="Select"
@@ -4327,7 +4338,7 @@
                                             </DataTemplate>
                                         </DataGridTemplateColumn.CellTemplate>
                                     </DataGridTemplateColumn>
-                                    <DataGridTemplateColumn Header="Review" Width="125">
+                                    <DataGridTemplateColumn Header="Review" Width="130" MinWidth="120">
                                         <DataGridTemplateColumn.CellTemplate>
                                             <DataTemplate>
                                                 <ComboBox ItemsSource="{Binding DataContext.ReviewStatusOptions, RelativeSource={RelativeSource AncestorType=DataGrid}}"

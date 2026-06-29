@@ -42,6 +42,16 @@ public enum ModelCompareObjectType
     Material
 }
 
+public enum ModelCompareMemberType
+{
+    NotApplicable,
+    Beam,
+    Column,
+    Brace,
+    Area,
+    Other
+}
+
 public enum ModelCompareChangeImportance
 {
     Info,
@@ -74,6 +84,8 @@ public class ModelCompareResultRow
 {
     public ModelCompareChangeType ChangeType { get; set; }
     public ModelCompareObjectType ObjectType { get; set; }
+    public ModelCompareMemberType MemberType { get; set; } = ModelCompareMemberType.NotApplicable;
+    public string Story { get; set; } = "";
     public string ObjectDescription { get; set; } = "";
     public string OldValue { get; set; } = "";
     public string NewValue { get; set; } = "";
