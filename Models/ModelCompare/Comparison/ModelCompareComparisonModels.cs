@@ -37,6 +37,7 @@ public enum ModelCompareObjectType
     ModelMetadata,
     Frame,
     Area,
+    Joint,
     FrameProperty,
     AreaProperty,
     Material

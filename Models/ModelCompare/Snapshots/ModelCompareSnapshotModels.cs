@@ -2,7 +2,8 @@ namespace CSIModellingTools.Models;
 
 public static class ModelCompareSchema
 {
-    public const int CurrentVersion = 3;
+    // v4: added joint objects (restraints) and frame end releases.
+    public const int CurrentVersion = 4;
 }
 
 public enum ModelCompareSnapshotReadStatus
@@ -20,6 +21,7 @@ public sealed class ModelCompareSnapshot
     public ModelCompareSnapshotMetadata Metadata { get; set; } = new();
     public List<ModelCompareFrameSnapshot> Frames { get; set; } = [];
     public List<ModelCompareAreaObjectSnapshot> Areas { get; set; } = [];
+    public List<ModelCompareJointSnapshot> Joints { get; set; } = [];
     public List<ModelCompareFramePropertySnapshot> FrameProperties { get; set; } = [];
     public List<ModelCompareAreaPropertySnapshot> AreaProperties { get; set; } = [];
     public List<ModelCompareMaterialSnapshot> Materials { get; set; } = [];
@@ -44,6 +46,7 @@ public sealed class ModelCompareSnapshotMetadata
     public ModelCompareSnapshotReadStatus AreaPropertiesReadStatus { get; set; }
     public ModelCompareSnapshotReadStatus MaterialsReadStatus { get; set; }
     public ModelCompareSnapshotReadStatus GroupsReadStatus { get; set; }
+    public ModelCompareSnapshotReadStatus JointsReadStatus { get; set; }
     public List<string> ExtractionWarnings { get; set; } = [];
 }
 
@@ -65,6 +68,37 @@ public sealed class ModelCompareFrameSnapshot
     public string SectionName { get; set; } = "";
     public string MaterialName { get; set; } = "";
     public List<string> GroupNames { get; set; } = [];
+
+    // End releases at the I and J ends, in ETABS DOF order [P, V2, V3, T, M2, M3].
+    public bool ReleaseAxialI { get; set; }
+    public bool ReleaseShear2I { get; set; }
+    public bool ReleaseShear3I { get; set; }
+    public bool ReleaseTorsionI { get; set; }
+    public bool ReleaseMoment2I { get; set; }
+    public bool ReleaseMoment3I { get; set; }
+    public bool ReleaseAxialJ { get; set; }
+    public bool ReleaseShear2J { get; set; }
+    public bool ReleaseShear3J { get; set; }
+    public bool ReleaseTorsionJ { get; set; }
+    public bool ReleaseMoment2J { get; set; }
+    public bool ReleaseMoment3J { get; set; }
+}
+
+[Serializable]
+public sealed class ModelCompareJointSnapshot
+{
+    public string PointName { get; set; } = "";
+    public double X { get; set; }
+    public double Y { get; set; }
+    public double Z { get; set; }
+
+    // Restraint DOFs in ETABS order [UX, UY, UZ, RX, RY, RZ].
+    public bool RestraintUX { get; set; }
+    public bool RestraintUY { get; set; }
+    public bool RestraintUZ { get; set; }
+    public bool RestraintRX { get; set; }
+    public bool RestraintRY { get; set; }
+    public bool RestraintRZ { get; set; }
 }
 
 [Serializable]

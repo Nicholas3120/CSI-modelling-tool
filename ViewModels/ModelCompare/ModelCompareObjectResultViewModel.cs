@@ -51,7 +51,7 @@ public sealed class ModelCompareObjectResultViewModel : INotifyPropertyChanged
     public string ChangeSummary { get; }
     public string SearchText { get; }
 
-    public bool IsSelectableInEtabs => ObjectType is ModelCompareObjectType.Frame or ModelCompareObjectType.Area;
+    public bool IsSelectableInEtabs => ObjectType is ModelCompareObjectType.Frame or ModelCompareObjectType.Area or ModelCompareObjectType.Joint;
 
     public string MemberTypeText => MemberType switch
     {

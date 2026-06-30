@@ -141,6 +141,7 @@ public sealed partial class EtabsParametricModellingService
                     {
                         ModelCompareObjectType.Frame => sapModel.FrameObj.SetSelected(target.ObjectName, true, EtabsObjects),
                         ModelCompareObjectType.Area => sapModel.AreaObj.SetSelected(target.ObjectName, true, EtabsObjects),
+                        ModelCompareObjectType.Joint => sapModel.PointObj.SetSelected(target.ObjectName, true, EtabsObjects),
                         _ => -1
                     };
                 }
@@ -226,7 +227,20 @@ public sealed partial class EtabsParametricModellingService
                 return false;
             }
 
-            failureReason = "Only frame and area comparison results can be selected in ETABS.";
+            if (target.ObjectType == ModelCompareObjectType.Joint)
+            {
+                double x = 0;
+                double y = 0;
+                double z = 0;
+                int ret = sapModel.PointObj.GetCoordCartesian(target.ObjectName, ref x, ref y, ref z, "Global");
+                if (ret == 0)
+                    return true;
+
+                failureReason = "The joint does not exist in the target ETABS model.";
+                return false;
+            }
+
+            failureReason = "Only frame, area and joint comparison results can be selected in ETABS.";
             return false;
         }
         catch (Exception ex)

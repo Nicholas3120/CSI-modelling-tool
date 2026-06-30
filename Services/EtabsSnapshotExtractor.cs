@@ -73,6 +73,9 @@ internal sealed class EtabsSnapshotExtractor
         if (frameNamesRead && frames.Count != expectedFrameCount)
             frameWarnings.Add($"Frame extraction was marked failed because {expectedFrameCount - frames.Count} of {expectedFrameCount} listed ETABS frames had unreadable geometry.");
 
+        // End releases are not part of the bulk frame read, so they need one GetReleases call per frame.
+        PopulateFrameReleases(_sapModel, frames, frameWarnings);
+
         var areaPropertyWarnings = new List<string>();
         bool areaPropertyNamesRead = TryGetAreaPropertyNamesForSnapshot(_sapModel, areaPropertyWarnings, out List<string> areaPropertyNames);
         List<ModelCompareAreaPropertySnapshot> areaProperties = areaPropertyNamesRead
@@ -107,6 +110,9 @@ internal sealed class EtabsSnapshotExtractor
                 .ToList()
             : [];
 
+        var jointWarnings = new List<string>();
+        bool jointsRead = TryGetJointSnapshots(_sapModel, pointCoordinates, jointWarnings, out List<ModelCompareJointSnapshot> joints);
+
         var extractionWarnings = new List<string>();
         extractionWarnings.AddRange(frameWarnings);
         extractionWarnings.AddRange(areaWarnings);
@@ -114,6 +120,7 @@ internal sealed class EtabsSnapshotExtractor
         extractionWarnings.AddRange(areaPropertyWarnings);
         extractionWarnings.AddRange(materialWarnings);
         extractionWarnings.AddRange(groupWarnings);
+        extractionWarnings.AddRange(jointWarnings);
         extractionWarnings = extractionWarnings
             .Where(warning => !string.IsNullOrWhiteSpace(warning))
             .Select(warning => warning.Trim())
@@ -140,10 +147,12 @@ internal sealed class EtabsSnapshotExtractor
                 AreaPropertiesReadStatus = BuildModelCompareReadStatus(areaPropertyNamesRead, areaPropertyWarnings),
                 MaterialsReadStatus = BuildModelCompareReadStatus(materialNamesRead, materialWarnings),
                 GroupsReadStatus = BuildModelCompareReadStatus(groupNamesRead, groupWarnings),
+                JointsReadStatus = BuildModelCompareReadStatus(jointsRead, jointWarnings),
                 ExtractionWarnings = extractionWarnings
             },
             Frames = frames,
             Areas = areas,
+            Joints = joints,
             FrameProperties = frameProperties,
             AreaProperties = areaProperties,
             Materials = materials
@@ -164,6 +173,156 @@ internal sealed class EtabsSnapshotExtractor
         return warnings.Count == 0
             ? ModelCompareSnapshotReadStatus.Success
             : ModelCompareSnapshotReadStatus.SuccessWithWarnings;
+    }
+
+    private static void PopulateFrameReleases(
+        ETABSv1.cSapModel sapModel,
+        IReadOnlyList<ModelCompareFrameSnapshot> frames,
+        List<string> warnings)
+    {
+        int failureCount = 0;
+        foreach (ModelCompareFrameSnapshot frame in frames)
+        {
+            bool[] ii = [];
+            bool[] jj = [];
+            double[] startValue = [];
+            double[] endValue = [];
+
+            try
+            {
+                int ret = sapModel.FrameObj.GetReleases(frame.FrameName, ref ii, ref jj, ref startValue, ref endValue);
+                if (ret != 0 || ii.Length < 6 || jj.Length < 6)
+                {
+                    failureCount++;
+                    continue;
+                }
+
+                frame.ReleaseAxialI = ii[0];
+                frame.ReleaseShear2I = ii[1];
+                frame.ReleaseShear3I = ii[2];
+                frame.ReleaseTorsionI = ii[3];
+                frame.ReleaseMoment2I = ii[4];
+                frame.ReleaseMoment3I = ii[5];
+                frame.ReleaseAxialJ = jj[0];
+                frame.ReleaseShear2J = jj[1];
+                frame.ReleaseShear3J = jj[2];
+                frame.ReleaseTorsionJ = jj[3];
+                frame.ReleaseMoment2J = jj[4];
+                frame.ReleaseMoment3J = jj[5];
+            }
+            catch
+            {
+                failureCount++;
+            }
+        }
+
+        if (failureCount > 0)
+            warnings.Add($"ETABS end releases could not be read for {failureCount} frame(s); those frames are treated as fully continuous.");
+    }
+
+    private static bool TryGetJointSnapshots(
+        ETABSv1.cSapModel sapModel,
+        IReadOnlyDictionary<string, (double X, double Y, double Z)> pointCoordinates,
+        List<string> warnings,
+        out List<ModelCompareJointSnapshot> joints)
+    {
+        joints = [];
+
+        // Resolve the list of point names from the bulk coordinate read; fall back to the name list.
+        List<string> pointNames;
+        if (pointCoordinates.Count > 0)
+        {
+            pointNames = pointCoordinates.Keys.ToList();
+        }
+        else
+        {
+            int numberNames = 0;
+            string[] rawNames = [];
+            try
+            {
+                int ret = sapModel.PointObj.GetNameList(ref numberNames, ref rawNames);
+                if (ret != 0)
+                {
+                    warnings.Add($"ETABS point object list could not be loaded for joint restraint extraction. Return code: {ret}.");
+                    return false;
+                }
+            }
+            catch (Exception ex)
+            {
+                warnings.Add("ETABS point object list could not be loaded for joint restraint extraction: " + ex.Message);
+                return false;
+            }
+
+            pointNames = rawNames
+                .Take(Math.Min(numberNames, rawNames.Length))
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name.Trim())
+                .ToList();
+        }
+
+        int failureCount = 0;
+        var collected = new List<ModelCompareJointSnapshot>();
+        foreach (string pointName in pointNames)
+        {
+            bool[] restraint = [];
+            try
+            {
+                int ret = sapModel.PointObj.GetRestraint(pointName, ref restraint);
+                if (ret != 0 || restraint.Length < 6)
+                {
+                    failureCount++;
+                    continue;
+                }
+            }
+            catch
+            {
+                failureCount++;
+                continue;
+            }
+
+            // Only capture joints that are actually restrained; unrestrained mesh nodes are not useful here.
+            if (!(restraint[0] || restraint[1] || restraint[2] || restraint[3] || restraint[4] || restraint[5]))
+                continue;
+
+            (double X, double Y, double Z) coordinate = pointCoordinates.TryGetValue(pointName, out (double X, double Y, double Z) cached)
+                ? cached
+                : TryReadPointCoordinate(sapModel, pointName);
+
+            collected.Add(new ModelCompareJointSnapshot
+            {
+                PointName = pointName,
+                X = coordinate.X,
+                Y = coordinate.Y,
+                Z = coordinate.Z,
+                RestraintUX = restraint[0],
+                RestraintUY = restraint[1],
+                RestraintUZ = restraint[2],
+                RestraintRX = restraint[3],
+                RestraintRY = restraint[4],
+                RestraintRZ = restraint[5]
+            });
+        }
+
+        joints = collected
+            .OrderBy(joint => joint.PointName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (failureCount > 0)
+            warnings.Add($"ETABS restraint data could not be read for {failureCount} point(s); those points were omitted from the joint comparison.");
+
+        return true;
+    }
+
+    private static (double X, double Y, double Z) TryReadPointCoordinate(ETABSv1.cSapModel sapModel, string pointName)
+    {
+        try
+        {
+            return GetPointCoordinates(sapModel, pointName);
+        }
+        catch
+        {
+            return (0, 0, 0);
+        }
     }
 
     private static bool TryGetAllFrameNamesForSnapshot(

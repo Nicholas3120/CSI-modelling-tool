@@ -253,6 +253,14 @@ public sealed class ModelCompareSnapshotJsonService
             snapshot.Materials = snapshot.Materials.Where(material => material != null).ToList();
         }
 
+        // Joints arrived in schema v4. An older snapshot has no joints array, so it deserializes to null
+        // and its JointsReadStatus stays Unknown, which makes the comparison skip joints rather than
+        // reporting every support as removed.
+        if (snapshot.Joints == null)
+            snapshot.Joints = [];
+        else
+            snapshot.Joints = snapshot.Joints.Where(joint => joint != null).ToList();
+
         foreach (ModelCompareFrameSnapshot frame in snapshot.Frames)
             frame.GroupNames ??= [];
 
@@ -274,6 +282,7 @@ public sealed class ModelCompareSnapshotJsonService
         metadata.AreaPropertiesReadStatus = NormalizeReadStatus(metadata.AreaPropertiesReadStatus);
         metadata.MaterialsReadStatus = NormalizeReadStatus(metadata.MaterialsReadStatus);
         metadata.GroupsReadStatus = NormalizeReadStatus(metadata.GroupsReadStatus);
+        metadata.JointsReadStatus = NormalizeReadStatus(metadata.JointsReadStatus);
     }
 
     private static ModelCompareSnapshotReadStatus NormalizeReadStatus(ModelCompareSnapshotReadStatus status)
@@ -290,7 +299,8 @@ public sealed class ModelCompareSnapshotJsonService
             metadata.FramePropertiesReadStatus == ModelCompareSnapshotReadStatus.Unknown ||
             metadata.AreaPropertiesReadStatus == ModelCompareSnapshotReadStatus.Unknown ||
             metadata.MaterialsReadStatus == ModelCompareSnapshotReadStatus.Unknown ||
-            metadata.GroupsReadStatus == ModelCompareSnapshotReadStatus.Unknown;
+            metadata.GroupsReadStatus == ModelCompareSnapshotReadStatus.Unknown ||
+            metadata.JointsReadStatus == ModelCompareSnapshotReadStatus.Unknown;
     }
 }
 

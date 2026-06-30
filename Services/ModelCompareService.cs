@@ -67,6 +67,12 @@ public sealed class ModelCompareService
             newSnapshot.Metadata.MaterialsReadStatus,
             comparison,
             () => CompareMaterials(oldSnapshot.Materials, newSnapshot.Materials, settings, results));
+        CompareOptionalCategory(
+            "Joint",
+            oldSnapshot.Metadata.JointsReadStatus,
+            newSnapshot.Metadata.JointsReadStatus,
+            comparison,
+            () => CompareJoints(oldSnapshot.Joints, newSnapshot.Joints, settings, results));
 
         comparison.Differences = results
             .OrderBy(row => row.ObjectType)
@@ -322,6 +328,22 @@ public sealed class ModelCompareService
             newFrame.Length,
             settings.LengthTolerance,
             ModelCompareChangeImportance.Medium);
+
+        AddStringDifference(
+            results,
+            ModelCompareObjectType.Frame,
+            $"{description} / I-end release",
+            DescribeRelease(oldFrame, isIEnd: true),
+            DescribeRelease(newFrame, isIEnd: true),
+            ModelCompareChangeImportance.High);
+
+        AddStringDifference(
+            results,
+            ModelCompareObjectType.Frame,
+            $"{description} / J-end release",
+            DescribeRelease(oldFrame, isIEnd: false),
+            DescribeRelease(newFrame, isIEnd: false),
+            ModelCompareChangeImportance.High);
     }
 
     private static void CompareAreas(
@@ -743,6 +765,165 @@ public sealed class ModelCompareService
             AddNumericDifference(results, ModelCompareObjectType.Material, $"{description} / Poisson ratio", oldMaterial.PoissonRatio, newMaterial.PoissonRatio, settings.MaterialPropertyTolerance, ModelCompareChangeImportance.Medium);
             AddNumericDifference(results, ModelCompareObjectType.Material, $"{description} / unit weight", oldMaterial.UnitWeight, newMaterial.UnitWeight, settings.MaterialPropertyTolerance, ModelCompareChangeImportance.Medium);
         }
+    }
+
+    private static void CompareJoints(
+        IReadOnlyList<ModelCompareJointSnapshot> oldJoints,
+        IReadOnlyList<ModelCompareJointSnapshot> newJoints,
+        ModelCompareToleranceSettings settings,
+        List<ModelCompareResultRow> results)
+    {
+        Dictionary<string, Queue<ModelCompareJointSnapshot>> oldByKey = BuildJointLookup(oldJoints, settings.CoordinateTolerance);
+        Dictionary<string, Queue<ModelCompareJointSnapshot>> newByKey = BuildJointLookup(newJoints, settings.CoordinateTolerance);
+        var allKeys = new SortedSet<string>(oldByKey.Keys, StringComparer.Ordinal);
+        allKeys.UnionWith(newByKey.Keys);
+
+        foreach (string key in allKeys)
+        {
+            oldByKey.TryGetValue(key, out Queue<ModelCompareJointSnapshot>? oldQueue);
+            newByKey.TryGetValue(key, out Queue<ModelCompareJointSnapshot>? newQueue);
+
+            while ((oldQueue?.Count ?? 0) > 0 && (newQueue?.Count ?? 0) > 0)
+            {
+                ModelCompareJointSnapshot oldJoint = oldQueue!.Dequeue();
+                ModelCompareJointSnapshot newJoint = newQueue!.Dequeue();
+                int resultStart = results.Count;
+                AddStringDifference(
+                    results,
+                    ModelCompareObjectType.Joint,
+                    $"{DescribeJoint(newJoint)} / restraint",
+                    DescribeRestraint(oldJoint),
+                    DescribeRestraint(newJoint),
+                    ModelCompareChangeImportance.High);
+                ApplyJointNavigationContext(results, resultStart, oldJoint, newJoint);
+            }
+
+            while ((oldQueue?.Count ?? 0) > 0)
+            {
+                ModelCompareJointSnapshot oldJoint = oldQueue!.Dequeue();
+                int resultStart = results.Count;
+                results.Add(BuildResult(
+                    ModelCompareChangeType.Removed,
+                    ModelCompareObjectType.Joint,
+                    DescribeJoint(oldJoint),
+                    DescribeRestraint(oldJoint),
+                    "",
+                    ModelCompareChangeImportance.High));
+                ApplyJointNavigationContext(results, resultStart, oldJoint, null);
+            }
+
+            while ((newQueue?.Count ?? 0) > 0)
+            {
+                ModelCompareJointSnapshot newJoint = newQueue!.Dequeue();
+                int resultStart = results.Count;
+                results.Add(BuildResult(
+                    ModelCompareChangeType.Added,
+                    ModelCompareObjectType.Joint,
+                    DescribeJoint(newJoint),
+                    "",
+                    DescribeRestraint(newJoint),
+                    ModelCompareChangeImportance.High));
+                ApplyJointNavigationContext(results, resultStart, null, newJoint);
+            }
+        }
+    }
+
+    private static Dictionary<string, Queue<ModelCompareJointSnapshot>> BuildJointLookup(
+        IEnumerable<ModelCompareJointSnapshot> joints,
+        double coordinateTolerance)
+    {
+        var lookup = new Dictionary<string, Queue<ModelCompareJointSnapshot>>(StringComparer.Ordinal);
+
+        foreach (ModelCompareJointSnapshot joint in joints.OrderBy(joint => joint.PointName, StringComparer.OrdinalIgnoreCase))
+        {
+            string key = BuildPointCoordinateKey(joint.X, joint.Y, joint.Z, coordinateTolerance);
+            if (!lookup.TryGetValue(key, out Queue<ModelCompareJointSnapshot>? queue))
+            {
+                queue = new Queue<ModelCompareJointSnapshot>();
+                lookup[key] = queue;
+            }
+
+            queue.Enqueue(joint);
+        }
+
+        return lookup;
+    }
+
+    private static void ApplyJointNavigationContext(
+        List<ModelCompareResultRow> results,
+        int startIndex,
+        ModelCompareJointSnapshot? oldJoint,
+        ModelCompareJointSnapshot? newJoint)
+    {
+        string oldName = (oldJoint?.PointName ?? "").Trim();
+        string newName = (newJoint?.PointName ?? "").Trim();
+        string oldLocation = oldJoint == null ? "" : FormatJointLocation(oldJoint);
+        string newLocation = newJoint == null ? "" : FormatJointLocation(newJoint);
+
+        for (int index = startIndex; index < results.Count; index++)
+        {
+            results[index].OldEtabsObjectName = oldName;
+            results[index].NewEtabsObjectName = newName;
+            results[index].OldObjectLocation = oldLocation;
+            results[index].NewObjectLocation = newLocation;
+        }
+    }
+
+    private static string DescribeJoint(ModelCompareJointSnapshot joint)
+    {
+        return $"Joint at ({FormatNumber(joint.X)}, {FormatNumber(joint.Y)}, {FormatNumber(joint.Z)})";
+    }
+
+    private static string FormatJointLocation(ModelCompareJointSnapshot joint)
+    {
+        return $"({FormatNumber(joint.X)}, {FormatNumber(joint.Y)}, {FormatNumber(joint.Z)})";
+    }
+
+    private static string DescribeRestraint(ModelCompareJointSnapshot joint)
+    {
+        bool[] dofs =
+        [
+            joint.RestraintUX, joint.RestraintUY, joint.RestraintUZ,
+            joint.RestraintRX, joint.RestraintRY, joint.RestraintRZ
+        ];
+
+        if (dofs.All(value => value))
+            return "Fixed";
+        if (dofs.All(value => !value))
+            return "Free";
+        if (joint.RestraintUX && joint.RestraintUY && joint.RestraintUZ &&
+            !joint.RestraintRX && !joint.RestraintRY && !joint.RestraintRZ)
+        {
+            return "Pinned";
+        }
+
+        string[] names = ["UX", "UY", "UZ", "RX", "RY", "RZ"];
+        return string.Join(" ", names.Where((_, index) => dofs[index]));
+    }
+
+    private static string DescribeRelease(ModelCompareFrameSnapshot frame, bool isIEnd)
+    {
+        bool[] dofs = isIEnd
+            ?
+            [
+                frame.ReleaseAxialI, frame.ReleaseShear2I, frame.ReleaseShear3I,
+                frame.ReleaseTorsionI, frame.ReleaseMoment2I, frame.ReleaseMoment3I
+            ]
+            :
+            [
+                frame.ReleaseAxialJ, frame.ReleaseShear2J, frame.ReleaseShear3J,
+                frame.ReleaseTorsionJ, frame.ReleaseMoment2J, frame.ReleaseMoment3J
+            ];
+
+        if (dofs.All(value => !value))
+            return "Continuous";
+
+        // Major + minor bending released with everything else continuous is the common pinned connection.
+        if (!dofs[0] && !dofs[1] && !dofs[2] && !dofs[3] && dofs[4] && dofs[5])
+            return "Pinned (M2, M3)";
+
+        string[] names = ["P", "V2", "V3", "T", "M2", "M3"];
+        return "Released: " + string.Join(", ", names.Where((_, index) => dofs[index]));
     }
 
     private static Dictionary<FramePointBucket, List<int>> BuildFrameEndpointLookup(

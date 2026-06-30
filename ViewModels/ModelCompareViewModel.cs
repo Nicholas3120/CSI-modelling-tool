@@ -453,7 +453,7 @@ public sealed class ModelCompareViewModel : ObservableObject
 
             foreach (ModelCompareResultRowViewModel row in rows)
             {
-                if (row.ObjectType is not (ModelCompareObjectType.Frame or ModelCompareObjectType.Area))
+                if (row.ObjectType is not (ModelCompareObjectType.Frame or ModelCompareObjectType.Area or ModelCompareObjectType.Joint))
                 {
                     unsupportedCount++;
                     continue;
