@@ -185,8 +185,50 @@ public sealed class AreaRecognitionService
                 .ToList();
         }
 
+        // The overwhelmingly common boundary curve from Revit (IFC4): an indexed polyline
+        // over a 2D/3D point list. Straight-segment ones map directly; arc segments are
+        // still skipped as a curved boundary.
+        if (curve is IIfcIndexedPolyCurve indexed)
+        {
+            if (indexed.Segments != null &&
+                indexed.Segments.Any(segment => segment.GetType().Name.Contains("Arc", StringComparison.OrdinalIgnoreCase)))
+            {
+                warnings.Add(BuildWarning(product, ifcType, IfcImportWarningSeverity.Warning, IfcImportWarningCategory.Boundary, "Boundary IndexedPolyCurve contains arc segments; curved area boundaries are not supported."));
+                return [];
+            }
+
+            return ExtractPointListBoundary(indexed.Points);
+        }
+
         warnings.Add(BuildWarning(product, ifcType, IfcImportWarningSeverity.Warning, IfcImportWarningCategory.Boundary, $"Complex boundary curve '{curve.GetType().Name}' was skipped."));
         return [];
+    }
+
+    private static List<ProfilePoint> ExtractPointListBoundary(IIfcCartesianPointList? points)
+    {
+        var result = new List<ProfilePoint>();
+
+        // CoordList items are value-type collections; iterate non-generically and box via Cast.
+        if (points is IIfcCartesianPointList2D list2D)
+        {
+            foreach (System.Collections.IEnumerable coordinate in list2D.CoordList)
+            {
+                double[] values = coordinate.Cast<object>().Select(ToDouble).ToArray();
+                if (values.Length >= 2)
+                    result.Add(new ProfilePoint(values[0], values[1], 0));
+            }
+        }
+        else if (points is IIfcCartesianPointList3D list3D)
+        {
+            foreach (System.Collections.IEnumerable coordinate in list3D.CoordList)
+            {
+                double[] values = coordinate.Cast<object>().Select(ToDouble).ToArray();
+                if (values.Length >= 2)
+                    result.Add(new ProfilePoint(values[0], values[1], values.Length >= 3 ? values[2] : 0));
+            }
+        }
+
+        return result;
     }
 
     private static double ResolveThickness(IIfcProduct product, IIfcExtrudedAreaSolid solid, double lengthFactor)

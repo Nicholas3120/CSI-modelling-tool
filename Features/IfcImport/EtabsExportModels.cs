@@ -42,7 +42,7 @@ public interface IEtabsFrameExporter
 
 public interface IEtabsAreaExporter
 {
-    EtabsExportResult ExportAreasToEtabs(IfcImportResult result, EtabsExportOptions options);
+    EtabsExportResult ExportAreasToEtabs(IfcImportResult result, EtabsExportOptions options, IProgress<EtabsExportProgress>? progress = null);
 }
 
 public sealed class EtabsExportOptions
@@ -59,6 +59,8 @@ public sealed class EtabsExportOptions
     public bool SkipUnknownSections { get; set; } = true;
     public bool SkipUnknownMaterials { get; set; } = true;
     public bool PreserveSourceGuid { get; set; } = true;
+    public bool ExportSlabAreas { get; set; } = true;
+    public bool ExportWallAreas { get; set; } = true;
     public string ExportGroupName { get; set; } = "IFC_STRUCTURAL_FRAME_IMPORT";
 }
 

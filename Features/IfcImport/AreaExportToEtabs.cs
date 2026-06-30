@@ -15,7 +15,7 @@ public sealed class AreaExportToEtabs : IEtabsAreaExporter
         _gatewayFactory = gatewayFactory;
     }
 
-    public EtabsExportResult ExportAreasToEtabs(IfcImportResult result, EtabsExportOptions options)
+    public EtabsExportResult ExportAreasToEtabs(IfcImportResult result, EtabsExportOptions options, IProgress<EtabsExportProgress>? progress = null)
     {
         options ??= new EtabsExportOptions();
         var exportResult = new EtabsExportResult();
@@ -28,6 +28,7 @@ public sealed class AreaExportToEtabs : IEtabsAreaExporter
 
         try
         {
+            progress?.Report(new EtabsExportProgress(0, "Connecting to ETABS for areas..."));
             using IEtabsAreaExportGateway gateway = _gatewayFactory();
             gateway.Connect(options.EtabsInstanceId);
             if (options.TargetMode == EtabsExportTargetMode.CreateNewModel)
@@ -37,8 +38,23 @@ public sealed class AreaExportToEtabs : IEtabsAreaExporter
             gateway.EnsureUnlocked();
             gateway.EnsureGroup(options.ExportGroupName);
 
+            int total = result.Areas.Count;
+            int processed = 0;
+            int lastReportedPercent = -1;
             foreach (AnalyticalAreaElement area in result.Areas)
+            {
                 ExportArea(area, options, gateway, exportResult);
+                processed++;
+                if (progress != null && total > 0)
+                {
+                    int percent = (int)(processed * 100.0 / total);
+                    if (percent != lastReportedPercent)
+                    {
+                        lastReportedPercent = percent;
+                        progress.Report(new EtabsExportProgress(percent, $"Exporting areas {processed}/{total}"));
+                    }
+                }
+            }
 
             exportResult.IsError = false;
             exportResult.Message = $"Exported {exportResult.ExportedAreaCount} IFC area(s) to ETABS. Skipped {exportResult.SkippedAreaCount}.";
@@ -66,6 +82,12 @@ public sealed class AreaExportToEtabs : IEtabsAreaExporter
     {
         try
         {
+            // Type selection (slabs vs walls) is independent of import, so a deselected
+            // type is silently filtered out here rather than counted as a skip.
+            bool isWall = IsWall(area);
+            if (isWall ? !options.ExportWallAreas : !options.ExportSlabAreas)
+                return;
+
             if (!ShouldExportConfidence(area, options, result))
                 return;
 

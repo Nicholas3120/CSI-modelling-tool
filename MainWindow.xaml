@@ -4431,14 +4431,22 @@
                     </GroupBox>
 
                     <GroupBox Header="Import Options" Grid.Row="1">
-                        <StackPanel Orientation="Horizontal">
+                        <WrapPanel>
                             <CheckBox Content="Include beams"
                                       IsChecked="{Binding IncludeBeams}"
-                                      Margin="0,0,18,0"
+                                      Margin="0,0,18,4"
                                       VerticalAlignment="Center"/>
                             <CheckBox Content="Include columns"
                                       IsChecked="{Binding IncludeColumns}"
-                                      Margin="0,0,18,0"
+                                      Margin="0,0,18,4"
+                                      VerticalAlignment="Center"/>
+                            <CheckBox Content="Include slabs"
+                                      IsChecked="{Binding IncludeSlabs}"
+                                      Margin="0,0,18,4"
+                                      VerticalAlignment="Center"/>
+                            <CheckBox Content="Include walls"
+                                      IsChecked="{Binding IncludeWalls}"
+                                      Margin="0,0,18,4"
                                       VerticalAlignment="Center"/>
                             <TextBlock Style="{StaticResource FieldLabel}"
                                        Text="Node snap (mm)"
@@ -4457,7 +4465,7 @@
                             <CheckBox Content="Recover mesh-only members"
                                       IsChecked="{Binding RecoverMeshGeometry}"
                                       VerticalAlignment="Center"/>
-                        </StackPanel>
+                        </WrapPanel>
                     </GroupBox>
 
                     <GroupBox Header="Result Summary" Grid.Row="2">
@@ -4584,9 +4592,22 @@
                             <WrapPanel Grid.Row="1"
                                        Grid.ColumnSpan="4"
                                        Margin="0,8,0,0">
+                                <CheckBox Content="Export frames"
+                                          IsChecked="{Binding ExportFramesToEtabs}"
+                                          Margin="0,0,18,4"
+                                          VerticalAlignment="Center"/>
+                                <CheckBox Content="Export slabs"
+                                          IsChecked="{Binding ExportSlabsToEtabs}"
+                                          Margin="0,0,18,4"
+                                          VerticalAlignment="Center"/>
+                                <CheckBox Content="Export walls"
+                                          IsChecked="{Binding ExportWallsToEtabs}"
+                                          Margin="0,0,18,4"
+                                          VerticalAlignment="Center"/>
+                                <Separator Margin="0,0,18,0"/>
                                 <CheckBox Content="Export medium confidence"
                                           IsChecked="{Binding ExportMediumConfidenceToEtabs}"
-                                          Margin="0,0,18,0"
+                                          Margin="0,0,18,4"
                                           VerticalAlignment="Center"/>
                                 <CheckBox Content="Use default section for unknown"
                                           IsChecked="{Binding UseDefaultSectionForUnknown}"

@@ -11,12 +11,20 @@ public sealed class RealEtabsAreaExportGateway : IEtabsAreaExportGateway
     private ETABSv1.cOAPI? _etabsObject;
     private ETABSv1.cSapModel? _sapModel;
 
+    // Existence caches scoped to one export run, so the first lookup scans ETABS once and
+    // later lookups (and names we create) hit the cache instead of re-querying per area.
+    private HashSet<string>? _materialNames;
+    private HashSet<string>? _areaPropertyNames;
+
     public void Connect(string? etabsInstanceId)
     {
         _etabsObject = GetEtabsObject(etabsInstanceId);
         _sapModel = _etabsObject.SapModel;
         if (_sapModel == null)
             throw new InvalidOperationException("Connected to ETABS, but SapModel was not available.");
+
+        _materialNames = null;
+        _areaPropertyNames = null;
     }
 
     public void CreateNewModel(IfcEtabsUnits units)
@@ -58,6 +66,15 @@ public sealed class RealEtabsAreaExportGateway : IEtabsAreaExportGateway
         if (normalized.Length == 0)
             return false;
 
+        return GetMaterialNameCache().Contains(normalized);
+    }
+
+    private HashSet<string> GetMaterialNameCache()
+    {
+        if (_materialNames != null)
+            return _materialNames;
+
+        _materialNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         ETABSv1.cSapModel sapModel = GetSapModel();
         foreach (ETABSv1.eMatType materialType in Enum.GetValues(typeof(ETABSv1.eMatType)).Cast<ETABSv1.eMatType>())
         {
@@ -65,10 +82,10 @@ public sealed class RealEtabsAreaExportGateway : IEtabsAreaExportGateway
             string[] materialNames = [];
             try
             {
-                if (sapModel.PropMaterial.GetNameList(ref numberNames, ref materialNames, materialType) == 0 &&
-                    materialNames.Take(Math.Min(numberNames, materialNames.Length)).Any(name => string.Equals(name, normalized, StringComparison.OrdinalIgnoreCase)))
+                if (sapModel.PropMaterial.GetNameList(ref numberNames, ref materialNames, materialType) == 0)
                 {
-                    return true;
+                    foreach (string name in materialNames.Take(Math.Min(numberNames, materialNames.Length)))
+                        _materialNames.Add(name);
                 }
             }
             catch
@@ -77,7 +94,7 @@ public sealed class RealEtabsAreaExportGateway : IEtabsAreaExportGateway
             }
         }
 
-        return false;
+        return _materialNames;
     }
 
     public void CreateMaterial(string materialName, EtabsMaterialKind materialKind)
@@ -91,6 +108,8 @@ public sealed class RealEtabsAreaExportGateway : IEtabsAreaExportGateway
         int ret = sapModel.PropMaterial.SetMaterial(name, materialType, -1, "Created from IFC Structural Area Importer", "");
         if (ret != 0)
             throw new InvalidOperationException($"ETABS could not create material '{name}'. Return code: {ret}.");
+
+        _materialNames?.Add(name);
 
         if (materialKind == EtabsMaterialKind.Steel)
         {
@@ -119,17 +138,31 @@ public sealed class RealEtabsAreaExportGateway : IEtabsAreaExportGateway
         if (normalized.Length == 0)
             return false;
 
+        return GetAreaPropertyNameCache().Contains(normalized);
+    }
+
+    private HashSet<string> GetAreaPropertyNameCache()
+    {
+        if (_areaPropertyNames != null)
+            return _areaPropertyNames;
+
+        _areaPropertyNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         int numberNames = 0;
         string[] names = [];
         try
         {
-            return GetSapModel().PropArea.GetNameList(ref numberNames, ref names, 0) == 0 &&
-                names.Take(Math.Min(numberNames, names.Length)).Any(name => string.Equals(name, normalized, StringComparison.OrdinalIgnoreCase));
+            if (GetSapModel().PropArea.GetNameList(ref numberNames, ref names, 0) == 0)
+            {
+                foreach (string name in names.Take(Math.Min(numberNames, names.Length)))
+                    _areaPropertyNames.Add(name);
+            }
         }
         catch
         {
-            return false;
+            // An empty cache simply means every property will be (re)created as needed.
         }
+
+        return _areaPropertyNames;
     }
 
     public void CreateAreaProperty(string propertyName, string materialName, double thickness, bool isWall)
@@ -161,6 +194,8 @@ public sealed class RealEtabsAreaExportGateway : IEtabsAreaExportGateway
 
         if (ret != 0)
             throw new InvalidOperationException($"ETABS could not create area property '{name}'. Return code: {ret}.");
+
+        _areaPropertyNames?.Add(name);
     }
 
     public void EnsureGroup(string groupName)

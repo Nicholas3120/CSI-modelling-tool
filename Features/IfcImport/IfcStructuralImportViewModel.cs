@@ -18,6 +18,7 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
     private readonly ImportReviewReportGenerator _reportGenerator = new();
     private readonly EtabsParametricModellingService _etabsService = new();
     private readonly IEtabsFrameExporter _etabsExporter = new EtabsFrameExporter();
+    private readonly IEtabsAreaExporter _areaExporter = new AreaExportToEtabs();
     private IfcImportResult? _currentResult;
     private EtabsInstanceInfo? _selectedEtabsInstance;
     private string _ifcFilePath = "";
@@ -27,12 +28,19 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
     private string _etabsExportStatus = "ETABS export is available after a successful import.";
     private bool _includeBeams = true;
     private bool _includeColumns = true;
+    private bool _includeSlabs;
+    private bool _includeWalls;
     private bool _resetCoordinateOrigin = true;
     private bool _connectFrames = true;
     private bool _recoverMeshGeometry = true;
     private bool _exportMediumConfidenceToEtabs = true;
     private bool _useDefaultSectionForUnknown = true;
-    private bool _useDefaultMaterialForUnknown;
+    // Default ON: a missing IFC material name must not silently drop a structural element
+    // from the ETABS export — it exports with a placeholder material to be reassigned.
+    private bool _useDefaultMaterialForUnknown = true;
+    private bool _exportFramesToEtabs = true;
+    private bool _exportSlabsToEtabs = true;
+    private bool _exportWallsToEtabs;
     private bool _isBusy;
     private double _nodeSnapToleranceMm = 20.0;
     private CancellationTokenSource? _importCts;
@@ -89,6 +97,18 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
         set => SetProperty(ref _includeColumns, value);
     }
 
+    public bool IncludeSlabs
+    {
+        get => _includeSlabs;
+        set => SetProperty(ref _includeSlabs, value);
+    }
+
+    public bool IncludeWalls
+    {
+        get => _includeWalls;
+        set => SetProperty(ref _includeWalls, value);
+    }
+
     public double NodeSnapToleranceMm
     {
         get => _nodeSnapToleranceMm;
@@ -129,6 +149,24 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
     {
         get => _useDefaultMaterialForUnknown;
         set => SetProperty(ref _useDefaultMaterialForUnknown, value);
+    }
+
+    public bool ExportFramesToEtabs
+    {
+        get => _exportFramesToEtabs;
+        set => SetProperty(ref _exportFramesToEtabs, value);
+    }
+
+    public bool ExportSlabsToEtabs
+    {
+        get => _exportSlabsToEtabs;
+        set => SetProperty(ref _exportSlabsToEtabs, value);
+    }
+
+    public bool ExportWallsToEtabs
+    {
+        get => _exportWallsToEtabs;
+        set => SetProperty(ref _exportWallsToEtabs, value);
     }
 
     public string JsonOutputPath
@@ -234,6 +272,8 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
         {
             IncludeBeams = IncludeBeams,
             IncludeColumns = IncludeColumns,
+            IncludeSlabs = IncludeSlabs,
+            IncludeWalls = IncludeWalls,
             NodeSnapTolerance = NodeSnapToleranceMm / 1000.0,
             ApplyFrameConditioning = ConnectFrames,
             RecoverMeshGeometry = RecoverMeshGeometry,
@@ -411,9 +451,9 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
             return;
         if (!EnsureResult())
             return;
-        if (_currentResult!.Frames.Count == 0)
+        if (_currentResult!.Frames.Count == 0 && _currentResult!.Areas.Count == 0)
         {
-            EtabsExportStatus = "No imported IFC frame elements are available for ETABS export.";
+            EtabsExportStatus = "No imported IFC frame or area elements are available for ETABS export.";
             OperationStatus = "ETABS export skipped.";
             return;
         }
@@ -421,6 +461,16 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
         // Capture bound inputs on the UI thread, then run the ETABS COM work on a
         // dedicated STA background thread so the window stays responsive and the
         // progress bar animates, while keeping the COM object on a single STA apartment.
+        bool exportFrames = ExportFramesToEtabs;
+        bool exportSlabs = ExportSlabsToEtabs;
+        bool exportWalls = ExportWallsToEtabs;
+        if (!exportFrames && !exportSlabs && !exportWalls)
+        {
+            EtabsExportStatus = "Nothing selected to export. Tick frames, slabs, or walls.";
+            OperationStatus = "ETABS export skipped.";
+            return;
+        }
+
         var options = new EtabsExportOptions
         {
             EtabsInstanceId = SelectedEtabsInstanceId,
@@ -428,22 +478,33 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
             ExportMediumConfidenceWithWarnings = ExportMediumConfidenceToEtabs,
             SkipUnknownMaterials = !UseDefaultMaterialForUnknown,
             SkipUnknownSections = !UseDefaultSectionForUnknown,
-            PreserveSourceGuid = true
+            PreserveSourceGuid = true,
+            ExportSlabAreas = exportSlabs,
+            ExportWallAreas = exportWalls
         };
         IfcImportResult exportInput = _currentResult!;
         var progress = new Progress<EtabsExportProgress>(OnExportProgress);
 
         IsBusy = true;
-        ResetProgress(indeterminate: true, "Exporting IFC frames to ETABS...");
-        OperationStatus = "Exporting IFC frames to ETABS...";
+        ResetProgress(indeterminate: true, "Exporting to ETABS...");
+        OperationStatus = "Exporting to ETABS...";
         CommandManager.InvalidateRequerySuggested();
 
         try
         {
-            EtabsExportResult result = await RunOnStaThread(
-                () => _etabsExporter.ExportFramesToEtabs(exportInput, options, progress));
+            EtabsExportResult result = await RunOnStaThread(() =>
+            {
+                EtabsExportResult frameResult = exportFrames && exportInput.Frames.Count > 0
+                    ? _etabsExporter.ExportFramesToEtabs(exportInput, options, progress)
+                    : new EtabsExportResult();
+                if ((exportSlabs || exportWalls) && exportInput.Areas.Count > 0)
+                    MergeExportResults(frameResult, _areaExporter.ExportAreasToEtabs(exportInput, options, progress));
+                return frameResult;
+            });
+
             string topWarningSummary = BuildEtabsWarningSummary(result);
-            EtabsExportStatus = $"{result.Message} Exported {result.ExportedFrameCount}, skipped {result.SkippedFrameCount}, warnings {result.Warnings.Count}.{topWarningSummary}";
+            EtabsExportStatus = $"Exported {result.ExportedFrameCount} frame(s) and {result.ExportedAreaCount} area(s); " +
+                $"skipped {result.SkippedFrameCount} frame(s), {result.SkippedAreaCount} area(s); warnings {result.Warnings.Count}.{topWarningSummary}";
             OperationStatus = result.IsError ? "ETABS export failed." : "ETABS export complete.";
             NotifyDone();
         }
@@ -503,6 +564,23 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
         {
             // A missing audio device must not affect the operation result.
         }
+    }
+
+    private static void MergeExportResults(EtabsExportResult target, EtabsExportResult source)
+    {
+        target.IsError = target.IsError || source.IsError;
+        target.ExportedFrameCount += source.ExportedFrameCount;
+        target.SkippedFrameCount += source.SkippedFrameCount;
+        target.ExportedAreaCount += source.ExportedAreaCount;
+        target.SkippedAreaCount += source.SkippedAreaCount;
+        target.CreatedMaterialCount += source.CreatedMaterialCount;
+        target.CreatedSectionCount += source.CreatedSectionCount;
+        target.CreatedAreaPropertyCount += source.CreatedAreaPropertyCount;
+        target.ExportedFrameNames.AddRange(source.ExportedFrameNames);
+        target.ExportedAreaNames.AddRange(source.ExportedAreaNames);
+        target.Warnings.AddRange(source.Warnings);
+        if (source.IsError && !string.IsNullOrWhiteSpace(source.Message))
+            target.Message = string.IsNullOrWhiteSpace(target.Message) ? source.Message : target.Message + " " + source.Message;
     }
 
     private static string BuildEtabsWarningSummary(EtabsExportResult result)
