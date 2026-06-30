@@ -28,6 +28,8 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
     private bool _includeBeams = true;
     private bool _includeColumns = true;
     private bool _resetCoordinateOrigin = true;
+    private bool _connectFrames = true;
+    private bool _recoverMeshGeometry = true;
     private bool _exportMediumConfidenceToEtabs = true;
     private bool _useDefaultSectionForUnknown = true;
     private bool _useDefaultMaterialForUnknown;
@@ -97,6 +99,18 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
     {
         get => _resetCoordinateOrigin;
         set => SetProperty(ref _resetCoordinateOrigin, value);
+    }
+
+    public bool ConnectFrames
+    {
+        get => _connectFrames;
+        set => SetProperty(ref _connectFrames, value);
+    }
+
+    public bool RecoverMeshGeometry
+    {
+        get => _recoverMeshGeometry;
+        set => SetProperty(ref _recoverMeshGeometry, value);
     }
 
     public bool ExportMediumConfidenceToEtabs
@@ -221,6 +235,8 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
             IncludeBeams = IncludeBeams,
             IncludeColumns = IncludeColumns,
             NodeSnapTolerance = NodeSnapToleranceMm / 1000.0,
+            ApplyFrameConditioning = ConnectFrames,
+            RecoverMeshGeometry = RecoverMeshGeometry,
             CoordinateOriginReset = ResetCoordinateOrigin
                 ? IfcImportCoordinateOriginMode.ResetToFirstImportedPoint
                 : IfcImportCoordinateOriginMode.PreserveIfcCoordinates
@@ -254,6 +270,7 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
                 : "";
             OperationStatus = $"Imported {result.ImportedCount} element(s), skipped {result.SkippedCount}, warnings {result.WarningCount}. {GeometrySummary}{offsetMessage}{displayLimitMessage}";
             EtabsExportStatus = "Ready to export high-confidence recognised frames to ETABS.";
+            NotifyDone();
         }
         catch (OperationCanceledException)
         {
@@ -388,34 +405,104 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
         });
     }
 
-    private void ExportToEtabs()
+    private async void ExportToEtabs()
     {
-        RunCommand("Exporting IFC frames to ETABS...", () =>
+        if (IsBusy)
+            return;
+        if (!EnsureResult())
+            return;
+        if (_currentResult!.Frames.Count == 0)
         {
-            if (!EnsureResult())
-                return;
-            if (_currentResult!.Frames.Count == 0)
-            {
-                EtabsExportStatus = "No imported IFC frame elements are available for ETABS export.";
-                OperationStatus = "ETABS export skipped.";
-                return;
-            }
+            EtabsExportStatus = "No imported IFC frame elements are available for ETABS export.";
+            OperationStatus = "ETABS export skipped.";
+            return;
+        }
 
-            var options = new EtabsExportOptions
-            {
-                EtabsInstanceId = SelectedEtabsInstanceId,
-                ExportOnlyHighConfidence = !ExportMediumConfidenceToEtabs,
-                ExportMediumConfidenceWithWarnings = ExportMediumConfidenceToEtabs,
-                SkipUnknownMaterials = !UseDefaultMaterialForUnknown,
-                SkipUnknownSections = !UseDefaultSectionForUnknown,
-                PreserveSourceGuid = true
-            };
+        // Capture bound inputs on the UI thread, then run the ETABS COM work on a
+        // dedicated STA background thread so the window stays responsive and the
+        // progress bar animates, while keeping the COM object on a single STA apartment.
+        var options = new EtabsExportOptions
+        {
+            EtabsInstanceId = SelectedEtabsInstanceId,
+            ExportOnlyHighConfidence = !ExportMediumConfidenceToEtabs,
+            ExportMediumConfidenceWithWarnings = ExportMediumConfidenceToEtabs,
+            SkipUnknownMaterials = !UseDefaultMaterialForUnknown,
+            SkipUnknownSections = !UseDefaultSectionForUnknown,
+            PreserveSourceGuid = true
+        };
+        IfcImportResult exportInput = _currentResult!;
+        var progress = new Progress<EtabsExportProgress>(OnExportProgress);
 
-            EtabsExportResult result = _etabsExporter.ExportFramesToEtabs(_currentResult!, options);
+        IsBusy = true;
+        ResetProgress(indeterminate: true, "Exporting IFC frames to ETABS...");
+        OperationStatus = "Exporting IFC frames to ETABS...";
+        CommandManager.InvalidateRequerySuggested();
+
+        try
+        {
+            EtabsExportResult result = await RunOnStaThread(
+                () => _etabsExporter.ExportFramesToEtabs(exportInput, options, progress));
             string topWarningSummary = BuildEtabsWarningSummary(result);
             EtabsExportStatus = $"{result.Message} Exported {result.ExportedFrameCount}, skipped {result.SkippedFrameCount}, warnings {result.Warnings.Count}.{topWarningSummary}";
             OperationStatus = result.IsError ? "ETABS export failed." : "ETABS export complete.";
-        });
+            NotifyDone();
+        }
+        catch (Exception ex)
+        {
+            EtabsExportStatus = "ETABS export failed: " + ex.Message;
+            OperationStatus = "ETABS export failed.";
+        }
+        finally
+        {
+            IsBusy = false;
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    private void OnExportProgress(EtabsExportProgress update)
+    {
+        if (!_isProgressDeterminate)
+        {
+            _isProgressDeterminate = true;
+            OnPropertyChanged(nameof(IsProgressIndeterminate));
+        }
+
+        ProgressPercent = update.Percent;
+        ProgressText = $"{update.Percent:0}% — {update.Stage}";
+    }
+
+    private static Task<T> RunOnStaThread<T>(Func<T> work)
+    {
+        var completion = new TaskCompletionSource<T>();
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                completion.SetResult(work());
+            }
+            catch (Exception ex)
+            {
+                completion.SetException(ex);
+            }
+        })
+        {
+            IsBackground = true
+        };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return completion.Task;
+    }
+
+    private static void NotifyDone()
+    {
+        try
+        {
+            System.Media.SystemSounds.Asterisk.Play();
+        }
+        catch
+        {
+            // A missing audio device must not affect the operation result.
+        }
     }
 
     private static string BuildEtabsWarningSummary(EtabsExportResult result)

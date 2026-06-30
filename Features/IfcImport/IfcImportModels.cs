@@ -70,6 +70,9 @@ public sealed class IfcImportOptions
     public bool IncludeWalls { get; set; }
     public bool IncludeStructuralSurfaceMembers { get; set; }
     public bool EnableAdvancedGeometryRecognition { get; set; }
+    public bool RecoverMeshGeometry { get; set; } = true;
+    public bool ApplyFrameConditioning { get; set; } = true;
+    public double FrameConditioningMergeTolerance { get; set; } = 0.075;
     public double NodeSnapTolerance { get; set; } = 0.020;
     public double StoreyElevationTolerance { get; set; } = 0.050;
     public double DuplicateFrameTolerance { get; set; } = 0.020;

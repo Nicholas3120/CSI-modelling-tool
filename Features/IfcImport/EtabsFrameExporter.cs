@@ -18,7 +18,7 @@ public sealed class EtabsFrameExporter : IEtabsFrameExporter
         _gatewayFactory = gatewayFactory;
     }
 
-    public EtabsExportResult ExportFramesToEtabs(IfcImportResult result, EtabsExportOptions options)
+    public EtabsExportResult ExportFramesToEtabs(IfcImportResult result, EtabsExportOptions options, IProgress<EtabsExportProgress>? progress = null)
     {
         options ??= new EtabsExportOptions();
         var exportResult = new EtabsExportResult();
@@ -31,6 +31,7 @@ public sealed class EtabsFrameExporter : IEtabsFrameExporter
 
         try
         {
+            progress?.Report(new EtabsExportProgress(0, "Connecting to ETABS..."));
             using IEtabsFrameExportGateway gateway = _gatewayFactory();
             gateway.Connect(options.EtabsInstanceId);
             if (options.TargetMode == EtabsExportTargetMode.CreateNewModel)
@@ -40,8 +41,23 @@ public sealed class EtabsFrameExporter : IEtabsFrameExporter
             gateway.EnsureUnlocked();
             gateway.EnsureGroup(options.ExportGroupName);
 
+            int total = result.Frames.Count;
+            int processed = 0;
+            int lastReportedPercent = -1;
             foreach (AnalyticalFrameElement frame in result.Frames)
+            {
                 ExportFrame(frame, options, gateway, exportResult);
+                processed++;
+                if (progress != null && total > 0)
+                {
+                    int percent = (int)(processed * 100.0 / total);
+                    if (percent != lastReportedPercent)
+                    {
+                        lastReportedPercent = percent;
+                        progress.Report(new EtabsExportProgress(percent, $"Exporting frames {processed}/{total}"));
+                    }
+                }
+            }
 
             exportResult.IsError = false;
             exportResult.Message = $"Exported {exportResult.ExportedFrameCount} IFC frame(s) to ETABS. Skipped {exportResult.SkippedFrameCount}.";

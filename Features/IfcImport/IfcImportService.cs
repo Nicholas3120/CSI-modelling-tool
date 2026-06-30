@@ -1,6 +1,9 @@
 using System.IO;
 using System.Globalization;
+using System.Runtime.InteropServices;
+using Xbim.Common;
 using Xbim.Common.Geometry;
+using Xbim.IO;
 using Xbim.Ifc;
 using Xbim.Ifc4.Interfaces;
 
@@ -19,6 +22,12 @@ public sealed class IfcImportService
     private readonly CoordinateOriginService _coordinateOriginService = new();
     private readonly AreaRecognitionService _areaRecognitionService = new();
     private readonly AdvancedFrameGeometryRecognitionService _advancedFrameGeometryRecognitionService = new();
+    private readonly AnalyticalFrameConditioningService _frameConditioningService = new();
+
+    // Memoizes resolved placement matrices by placement entity label within one import,
+    // so shared storey/building/site placements are not re-walked for every element.
+    // Entity labels are per-model, so this is cleared at the start of each import.
+    private readonly Dictionary<int, XbimMatrix3D> _placementCache = new();
 
     public IfcImportResult ImportStructuralFrames(
         string ifcPath,
@@ -34,8 +43,8 @@ public sealed class IfcImportService
         options ??= new IfcImportOptions();
 
         var result = new IfcImportResult();
-        progress?.Report(new IfcImportProgress(0, "Opening IFC file...", false));
-        using IfcStore model = IfcStore.Open(ifcPath);
+        _placementCache.Clear();
+        using IfcStore model = OpenModel(ifcPath, progress);
         cancellationToken.ThrowIfCancellationRequested();
 
         progress?.Report(new IfcImportProgress(0, "Reading model data...", false));
@@ -72,7 +81,15 @@ public sealed class IfcImportService
         foreach (ImportCandidate candidate in candidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ImportFrameCandidate(candidate, lengthFactor, storeys, options, result);
+            try
+            {
+                ImportFrameCandidate(candidate, lengthFactor, storeys, options, result);
+            }
+            catch (Exception ex)
+            {
+                RecordCandidateError(candidate, result, ex);
+            }
+
             processed++;
             ReportRecognition($"Recognising elements {processed}/{total}");
         }
@@ -80,12 +97,22 @@ public sealed class IfcImportService
         foreach (ImportCandidate candidate in areaCandidates)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            ImportAreaCandidate(candidate, lengthFactor, storeys, options, result);
+            try
+            {
+                ImportAreaCandidate(candidate, lengthFactor, storeys, options, result);
+            }
+            catch (Exception ex)
+            {
+                RecordCandidateError(candidate, result, ex);
+            }
+
             processed++;
             ReportRecognition($"Recognising elements {processed}/{total}");
         }
 
         progress?.Report(new IfcImportProgress(96, "Cleaning up and validating...", true));
+        if (options.ApplyFrameConditioning)
+            result.Warnings.AddRange(_frameConditioningService.ConditionFrames(result.Frames, options.FrameConditioningMergeTolerance));
         AddScaleSanityWarning(result, lengthFactor);
         result.Warnings.AddRange(_coordinateOriginService.ApplyCoordinateOriginReset(result, options));
         List<IfcImportWarning> snapWarnings = _nodeSnapper.SnapFrameEndpoints(result.Frames, options.NodeSnapTolerance);
@@ -139,6 +166,21 @@ public sealed class IfcImportService
         }
     }
 
+    // A single malformed element must never abort the whole import; record it as a skip
+    // with the error so the rest of the model still comes through.
+    private static void RecordCandidateError(ImportCandidate candidate, IfcImportResult result, Exception ex)
+    {
+        string reason = $"Element processing failed: {ex.Message}";
+        result.SkippedElements.Add(new SkippedIfcElement
+        {
+            SourceGuid = GetGuid(candidate.Product),
+            SourceName = GetName(candidate.Product),
+            IfcType = candidate.IfcType,
+            Reason = reason
+        });
+        result.Warnings.Add(BuildWarning(candidate, IfcImportWarningSeverity.Error, IfcImportWarningCategory.Geometry, reason));
+    }
+
     private void ImportFrameCandidate(
         ImportCandidate candidate,
         double lengthFactor,
@@ -165,8 +207,22 @@ public sealed class IfcImportService
             }
         }
 
-        string reason = options.EnableAdvancedGeometryRecognition
-            ? "No usable Axis, SweptSolid, or safely inferred Brep/mesh representation found."
+        // Members exported as a triangle mesh instead of an extrusion (e.g. notched wall
+        // columns) have no Axis or SweptSolid. Recover them from the mesh bounding box so
+        // they are not silently dropped; they are flagged low-confidence for review.
+        if (options.RecoverMeshGeometry)
+        {
+            AdvancedFrameGeometryRecognitionResult meshResult = _advancedFrameGeometryRecognitionService.TryRecoverPrismaticMember(candidate.Product, candidate.IfcType, lengthFactor);
+            localWarnings.AddRange(meshResult.Warnings);
+            if (meshResult.Frame != null)
+            {
+                FinalizeFrame(meshResult.Frame, candidate, lengthFactor, storeys, options, result, localWarnings);
+                return;
+            }
+        }
+
+        string reason = options.EnableAdvancedGeometryRecognition || options.RecoverMeshGeometry
+            ? "No usable Axis, SweptSolid, or recoverable mesh representation found."
             : "No usable Axis or SweptSolid representation found.";
         result.SkippedElements.Add(new SkippedIfcElement
         {
@@ -261,7 +317,7 @@ public sealed class IfcImportService
         result.Warnings.AddRange(localWarnings);
     }
 
-    private static bool TryCreateFromAxis(
+    private bool TryCreateFromAxis(
         ImportCandidate candidate,
         double lengthFactor,
         List<IfcImportWarning> warnings,
@@ -526,7 +582,7 @@ public sealed class IfcImportService
             lengthFactor);
     }
 
-    private static bool TryCreateFromSweptSolid(
+    private bool TryCreateFromSweptSolid(
         ImportCandidate candidate,
         double lengthFactor,
         List<IfcImportWarning> warnings,
@@ -616,7 +672,7 @@ public sealed class IfcImportService
         };
     }
 
-    private static XbimMatrix3D ResolvePlacement(
+    private XbimMatrix3D ResolvePlacement(
         IIfcObjectPlacement? placement,
         List<IfcImportWarning> warnings,
         ImportCandidate candidate)
@@ -633,14 +689,18 @@ public sealed class IfcImportService
             return new XbimMatrix3D();
         }
 
+        if (_placementCache.TryGetValue(localPlacement.EntityLabel, out XbimMatrix3D cached))
+            return cached;
+
         XbimMatrix3D relative = localPlacement.RelativePlacement == null
             ? new XbimMatrix3D()
             : Xbim.Ifc.IIfcAxis2PlacementExtensions.ToMatrix3D(localPlacement.RelativePlacement);
-        if (localPlacement.PlacementRelTo == null)
-            return relative;
+        XbimMatrix3D result = localPlacement.PlacementRelTo == null
+            ? relative
+            : XbimMatrix3D.Multiply(relative, ResolvePlacement(localPlacement.PlacementRelTo, warnings, candidate));
 
-        XbimMatrix3D parent = ResolvePlacement(localPlacement.PlacementRelTo, warnings, candidate);
-        return XbimMatrix3D.Multiply(relative, parent);
+        _placementCache[localPlacement.EntityLabel] = result;
+        return result;
     }
 
     private static AnalyticalPoint TransformPoint(XbimMatrix3D matrix, IIfcCartesianPoint point, double lengthFactor)
@@ -774,6 +834,31 @@ public sealed class IfcImportService
             };
         }
 
+        // Precast/arbitrary profiles (very common from Revit) carry their real outline as a
+        // polyline. Read its bounding box for true width x depth instead of leaving the
+        // section Unknown and guessing from the name later. Genuinely shaped sections
+        // (L, T, ledge beams) are approximated by their bounding box and flagged.
+        if (profile is IIfcArbitraryClosedProfileDef arbitrary &&
+            TryProfileBoundingBox(arbitrary.OuterCurve, out double profileWidth, out double profileDepth, out int cornerCount) &&
+            profileWidth > 0 && profileDepth > 0)
+        {
+            if (cornerCount > 5)
+            {
+                warnings.Add(BuildWarning(candidate, IfcImportWarningSeverity.Info, IfcImportWarningCategory.Section,
+                    $"Non-rectangular profile '{profileType}' ({cornerCount} corners) approximated by its bounding box " +
+                    $"{ToMillimetreName(profileWidth * lengthFactor)}x{ToMillimetreName(profileDepth * lengthFactor)} mm; verify section."));
+            }
+
+            return new SectionInfo
+            {
+                OriginalIfcProfileType = profileType,
+                ShapeType = IfcSectionShapeType.Rectangle,
+                Width = profileWidth,
+                Depth = profileDepth,
+                SectionName = BuildRectangleSectionName(ifcType, profileWidth * lengthFactor, profileDepth * lengthFactor, profileName)
+            };
+        }
+
         warnings.Add(BuildWarning(candidate, IfcImportWarningSeverity.Warning, IfcImportWarningCategory.Section, $"Unsupported IFC profile '{profileType}' was kept as ShapeType.Unknown."));
         return new SectionInfo
         {
@@ -781,6 +866,66 @@ public sealed class IfcImportService
             ShapeType = IfcSectionShapeType.Unknown,
             SectionName = string.IsNullOrWhiteSpace(profileName) ? "UNKNOWN_SECTION" : profileName
         };
+    }
+
+    private static bool TryProfileBoundingBox(IIfcCurve? curve, out double width, out double depth, out int cornerCount)
+    {
+        width = 0;
+        depth = 0;
+        cornerCount = 0;
+
+        List<(double X, double Y)> points = ExtractProfilePoints(curve);
+        if (points.Count < 3)
+            return false;
+
+        double minX = double.PositiveInfinity, minY = double.PositiveInfinity;
+        double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity;
+        foreach ((double x, double y) in points)
+        {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+        }
+
+        width = maxX - minX;
+        depth = maxY - minY;
+        cornerCount = points.Count;
+        return double.IsFinite(width) && double.IsFinite(depth);
+    }
+
+    private static List<(double X, double Y)> ExtractProfilePoints(IIfcCurve? curve)
+    {
+        var points = new List<(double X, double Y)>();
+        switch (curve)
+        {
+            case IIfcPolyline polyline:
+                foreach (IIfcCartesianPoint point in polyline.Points)
+                    points.Add((ToDouble(point.X), ToDouble(point.Y)));
+                break;
+
+            case IIfcIndexedPolyCurve indexed when indexed.Points is IIfcCartesianPointList2D list2D:
+                foreach (System.Collections.IEnumerable coordinate in list2D.CoordList)
+                {
+                    double[] values = coordinate.Cast<object>().Select(ToDouble).ToArray();
+                    if (values.Length >= 2)
+                        points.Add((values[0], values[1]));
+                }
+
+                break;
+
+            case IIfcIndexedPolyCurve indexed when indexed.Points is IIfcCartesianPointList3D list3D:
+                foreach (System.Collections.IEnumerable coordinate in list3D.CoordList)
+                {
+                    double[] values = coordinate.Cast<object>().Select(ToDouble).ToArray();
+                    if (values.Length >= 2)
+                        points.Add((values[0], values[1]));
+                }
+
+                break;
+        }
+
+        return points;
     }
 
     private static SectionInfo ConvertSectionUnits(SectionInfo source, double lengthFactor, string ifcType)
@@ -959,6 +1104,70 @@ public sealed class IfcImportService
             Category = category,
             Message = message
         };
+    }
+
+    // xbim keeps the model in RAM when the IFC size (MB) is at or below the threshold we
+    // pass, otherwise it builds a slower disk-backed database. We size the threshold to the
+    // machine's free memory, so large models open in memory where RAM allows and fall back
+    // to the disk model on low-memory machines instead of failing.
+    private const double InMemoryExpansionFactor = 8.0;   // in-memory model ~ 8x IFC text size
+    private const double InMemorySafetyFraction = 0.5;    // never budget more than half of free RAM
+    private const double MinimumInMemoryThresholdMb = 50.0;
+
+    private static IfcStore OpenModel(string ifcPath, IProgress<IfcImportProgress>? progress)
+    {
+        double fileMb = new FileInfo(ifcPath).Length / (1024.0 * 1024.0);
+        double maxInMemoryMb = ComputeInMemoryThresholdMb();
+        bool inMemory = fileMb <= maxInMemoryMb;
+        string mode = inMemory ? "in memory" : "disk-backed, low memory";
+
+        progress?.Report(new IfcImportProgress(0, $"Opening IFC file ({mode})...", false));
+        ReportProgressDelegate reportProgress = (percent, _) =>
+            progress?.Report(new IfcImportProgress(0, $"Opening IFC file ({mode})... {percent}%", false));
+
+        double xbimThresholdMb = inMemory ? fileMb + 1.0 : 0.0;
+        return IfcStore.Open(ifcPath, null, xbimThresholdMb, reportProgress, XbimDBAccess.Read);
+    }
+
+    private static double ComputeInMemoryThresholdMb()
+    {
+        ulong availableBytes = GetAvailablePhysicalMemoryBytes();
+        if (availableBytes == 0)
+            return MinimumInMemoryThresholdMb;
+
+        double budgetMb = availableBytes * InMemorySafetyFraction / InMemoryExpansionFactor / (1024.0 * 1024.0);
+        return Math.Max(budgetMb, MinimumInMemoryThresholdMb);
+    }
+
+    private static ulong GetAvailablePhysicalMemoryBytes()
+    {
+        try
+        {
+            var status = new MemoryStatusEx { dwLength = (uint)Marshal.SizeOf<MemoryStatusEx>() };
+            return GlobalMemoryStatusEx(ref status) ? status.ullAvailPhys : 0;
+        }
+        catch
+        {
+            return 0;
+        }
+    }
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx lpBuffer);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct MemoryStatusEx
+    {
+        public uint dwLength;
+        public uint dwMemoryLoad;
+        public ulong ullTotalPhys;
+        public ulong ullAvailPhys;
+        public ulong ullTotalPageFile;
+        public ulong ullAvailPageFile;
+        public ulong ullTotalVirtual;
+        public ulong ullAvailVirtual;
+        public ulong ullAvailExtendedVirtual;
     }
 
     private sealed record ImportCandidate(IIfcProduct Product, string IfcType);

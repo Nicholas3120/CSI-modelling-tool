@@ -130,6 +130,120 @@ public sealed class AdvancedFrameGeometryRecognitionService
         return result;
     }
 
+    /// <summary>
+    /// Recovers a prismatic member from tessellated/mesh-only geometry (e.g. columns and
+    /// beams that an authoring tool exported as a triangle mesh instead of an extrusion).
+    /// Unlike <see cref="TryInferFrame"/>, this does not require a slender shape: it reads
+    /// the axis-aligned bounding box, takes the member axis from the IFC type (column =
+    /// vertical, beam = longest horizontal), and reports the section as the perpendicular
+    /// extents. Results are always low-confidence and flagged for review.
+    /// </summary>
+    public AdvancedFrameGeometryRecognitionResult TryRecoverPrismaticMember(
+        IIfcProduct product,
+        string ifcType,
+        double lengthFactor)
+    {
+        var result = new AdvancedFrameGeometryRecognitionResult();
+        XbimMatrix3D placement = ResolvePlacement(product.ObjectPlacement, result.Warnings, product, ifcType);
+        List<AnalyticalPoint> vertices = Deduplicate(CollectBodyVertices(product, placement, lengthFactor, result.Warnings, ifcType));
+        if (vertices.Count < 4)
+        {
+            result.SkipReason = "Mesh recovery skipped: not enough mesh vertices.";
+            return result;
+        }
+
+        if (vertices.Count > MaximumVertexCount)
+        {
+            result.SkipReason = "Mesh recovery skipped: mesh is too dense or complex.";
+            return result;
+        }
+
+        double minX = double.PositiveInfinity, minY = double.PositiveInfinity, minZ = double.PositiveInfinity;
+        double maxX = double.NegativeInfinity, maxY = double.NegativeInfinity, maxZ = double.NegativeInfinity;
+        foreach (AnalyticalPoint vertex in vertices)
+        {
+            minX = Math.Min(minX, vertex.X); maxX = Math.Max(maxX, vertex.X);
+            minY = Math.Min(minY, vertex.Y); maxY = Math.Max(maxY, vertex.Y);
+            minZ = Math.Min(minZ, vertex.Z); maxZ = Math.Max(maxZ, vertex.Z);
+        }
+
+        double extentX = maxX - minX, extentY = maxY - minY, extentZ = maxZ - minZ;
+        int axis = ifcType == "IfcColumn"
+            ? 2
+            : ifcType == "IfcBeam"
+                ? (extentX >= extentY ? 0 : 1)
+                : LongestAxis(extentX, extentY, extentZ);
+
+        double length = axis == 0 ? extentX : axis == 1 ? extentY : extentZ;
+        if (length < MinimumInferredLength)
+        {
+            result.SkipReason = "Mesh recovery skipped: recovered member length is very short.";
+            return result;
+        }
+
+        double cx = (minX + maxX) / 2.0, cy = (minY + maxY) / 2.0, cz = (minZ + maxZ) / 2.0;
+        AnalyticalPoint start, end;
+        double sectionWidth, sectionDepth;
+        switch (axis)
+        {
+            case 0:
+                start = new AnalyticalPoint { X = minX, Y = cy, Z = cz };
+                end = new AnalyticalPoint { X = maxX, Y = cy, Z = cz };
+                sectionWidth = extentY; sectionDepth = extentZ;
+                break;
+            case 1:
+                start = new AnalyticalPoint { X = cx, Y = minY, Z = cz };
+                end = new AnalyticalPoint { X = cx, Y = maxY, Z = cz };
+                sectionWidth = extentX; sectionDepth = extentZ;
+                break;
+            default:
+                start = new AnalyticalPoint { X = cx, Y = cy, Z = minZ };
+                end = new AnalyticalPoint { X = cx, Y = cy, Z = maxZ };
+                sectionWidth = extentX; sectionDepth = extentY;
+                break;
+        }
+
+        if (sectionWidth <= 0 || sectionDepth <= 0)
+        {
+            result.SkipReason = "Mesh recovery skipped: section dimensions could not be measured.";
+            return result;
+        }
+
+        var frame = new AnalyticalFrameElement
+        {
+            SourceGuid = GetGuid(product),
+            SourceName = GetName(product),
+            IfcType = ifcType,
+            StartPoint = start,
+            EndPoint = end,
+            // Medium (not Low): a prismatic member read from a clean mesh bounding box is
+            // reliable enough to export under the default "medium confidence" setting,
+            // while still carrying a verify-me warning.
+            RecognitionMethod = IfcRecognitionMethod.Inferred,
+            Confidence = IfcRecognitionConfidence.Medium,
+            SectionInfo = new SectionInfo
+            {
+                ShapeType = IfcSectionShapeType.Rectangle,
+                Width = sectionWidth,
+                Depth = sectionDepth,
+                SectionName = BuildInferredSectionName(ifcType, sectionWidth, sectionDepth),
+                OriginalIfcProfileType = "RecoveredFromMesh"
+            }
+        };
+        string message = "Element recovered from mesh geometry (no extrusion/axis representation). Verify centreline and section.";
+        frame.Warnings.Add(message);
+        result.Warnings.Add(BuildWarning(product, ifcType, IfcImportWarningSeverity.Warning, IfcImportWarningCategory.Geometry, message));
+        result.Frame = frame;
+        return result;
+    }
+
+    private static int LongestAxis(double extentX, double extentY, double extentZ)
+    {
+        if (extentX >= extentY && extentX >= extentZ)
+            return 0;
+        return extentY >= extentZ ? 1 : 2;
+    }
+
     private static List<AnalyticalPoint> CollectBodyVertices(
         IIfcProduct product,
         XbimMatrix3D placement,
@@ -180,6 +294,11 @@ public sealed class AdvancedFrameGeometryRecognitionService
             case IIfcTessellatedFaceSet tessellatedFaceSet:
                 CollectPointListVertices(tessellatedFaceSet.Coordinates, placement, lengthFactor, vertices);
                 break;
+            case IIfcMappedItem mappedItem:
+                XbimMatrix3D mappedPlacement = ResolveMappedItemPlacement(mappedItem, placement);
+                foreach (IIfcRepresentationItem mappedRepresentationItem in mappedItem.MappingSource.MappedRepresentation.Items)
+                    CollectVertices(mappedRepresentationItem, mappedPlacement, lengthFactor, vertices, warnings, product, ifcType);
+                break;
             default:
                 warnings.Add(BuildWarning(product, ifcType, IfcImportWarningSeverity.Info, IfcImportWarningCategory.Unsupported, $"Advanced recognition ignored unsupported representation item '{item.GetType().Name}'."));
                 break;
@@ -211,9 +330,11 @@ public sealed class AdvancedFrameGeometryRecognitionService
         double lengthFactor,
         List<AnalyticalPoint> vertices)
     {
-        foreach (IEnumerable<object> coordinate in pointList.CoordList)
+        // CoordList items are value-type collections (ItemSet<IfcLengthMeasure>), which do
+        // not covary to IEnumerable<object>; iterate non-generically and box via Cast.
+        foreach (System.Collections.IEnumerable coordinate in pointList.CoordList)
         {
-            double[] values = coordinate.Select(ToDouble).ToArray();
+            double[] values = coordinate.Cast<object>().Select(ToDouble).ToArray();
             if (values.Length >= 3)
                 vertices.Add(TransformPoint(placement, values[0], values[1], values[2], lengthFactor));
         }
@@ -409,6 +530,40 @@ public sealed class AdvancedFrameGeometryRecognitionService
             Y = transformed.Y * lengthFactor,
             Z = transformed.Z * lengthFactor
         };
+    }
+
+    private static XbimMatrix3D ResolveMappedItemPlacement(IIfcMappedItem mappedItem, XbimMatrix3D parentPlacement)
+    {
+        XbimMatrix3D mappingOrigin = mappedItem.MappingSource.MappingOrigin == null
+            ? new XbimMatrix3D()
+            : Xbim.Ifc.IIfcAxis2PlacementExtensions.ToMatrix3D(mappedItem.MappingSource.MappingOrigin);
+        XbimMatrix3D mappingTarget = ToTransformMatrix(mappedItem.MappingTarget);
+        return XbimMatrix3D.Multiply(XbimMatrix3D.Multiply(mappingOrigin, mappingTarget), parentPlacement);
+    }
+
+    private static XbimMatrix3D ToTransformMatrix(IIfcCartesianTransformationOperator transformation)
+    {
+        double scale = transformation.Scale.HasValue ? ToDouble(transformation.Scale.Value) : 1.0;
+        Vector3 axis1 = DirectionOr(transformation.Axis1, new Vector3(1, 0, 0));
+        Vector3 axis2 = DirectionOr(transformation.Axis2, new Vector3(0, 1, 0));
+        Vector3 axis3 = transformation is IIfcCartesianTransformationOperator3D transformation3D
+            ? DirectionOr(transformation3D.Axis3, Cross(axis1, axis2).Normalize())
+            : new Vector3(0, 0, 1);
+
+        return new XbimMatrix3D(
+            axis1.X * scale, axis1.Y * scale, axis1.Z * scale, 0,
+            axis2.X * scale, axis2.Y * scale, axis2.Z * scale, 0,
+            axis3.X * scale, axis3.Y * scale, axis3.Z * scale, 0,
+            ToDouble(transformation.LocalOrigin.X), ToDouble(transformation.LocalOrigin.Y), ToDouble(transformation.LocalOrigin.Z), 1);
+    }
+
+    private static Vector3 DirectionOr(IIfcDirection? direction, Vector3 fallback)
+    {
+        if (direction == null)
+            return fallback;
+
+        Vector3 value = new Vector3(ToDouble(direction.X), ToDouble(direction.Y), ToDouble(direction.Z)).Normalize();
+        return value.Length <= double.Epsilon ? fallback : value;
     }
 
     private static AnalyticalPoint Centroid(IReadOnlyList<AnalyticalPoint> points)

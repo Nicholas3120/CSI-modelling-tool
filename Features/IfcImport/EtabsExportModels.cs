@@ -33,9 +33,11 @@ public enum EtabsExportWarningCategory
     Area
 }
 
+public readonly record struct EtabsExportProgress(double Percent, string Stage);
+
 public interface IEtabsFrameExporter
 {
-    EtabsExportResult ExportFramesToEtabs(IfcImportResult result, EtabsExportOptions options);
+    EtabsExportResult ExportFramesToEtabs(IfcImportResult result, EtabsExportOptions options, IProgress<EtabsExportProgress>? progress = null);
 }
 
 public interface IEtabsAreaExporter
