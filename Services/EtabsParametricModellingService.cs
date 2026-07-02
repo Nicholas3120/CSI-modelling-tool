@@ -6534,11 +6534,35 @@ public sealed partial class EtabsParametricModellingService
         if (member.ReleaseMoments)
             return true;
 
+        if (IsOrthogonalYZGroup(member.Group))
+        {
+            if (model.OrthogonalYZTrussType == TrussType.SimpleFrame)
+                return false;
+
+            return !IsTrussChordGroup(member.Group);
+        }
+
         if (model.TrussType == TrussType.SimpleFrame)
             return false;
 
-        return !string.Equals(member.Group, ParametricMemberGroups.TopChord, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(member.Group, ParametricMemberGroups.BottomChord, StringComparison.OrdinalIgnoreCase);
+        return !IsTrussChordGroup(member.Group);
+    }
+
+    private static bool IsTrussChordGroup(string group)
+    {
+        return string.Equals(group, ParametricMemberGroups.TopChord, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(group, ParametricMemberGroups.BottomChord, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(group, ParametricMemberGroups.YZTopChord, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(group, ParametricMemberGroups.YZBottomChord, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsOrthogonalYZGroup(string group)
+    {
+        return string.Equals(group, ParametricMemberGroups.YZTopChord, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(group, ParametricMemberGroups.YZBottomChord, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(group, ParametricMemberGroups.YZDiagonal, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(group, ParametricMemberGroups.YZVertical, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(group, ParametricMemberGroups.YZEndPost, StringComparison.OrdinalIgnoreCase);
     }
 
     private static void TryAssignSupportRestraints(
@@ -6564,17 +6588,34 @@ public sealed partial class EtabsParametricModellingService
             return;
         }
 
-        for (int index = 0; index < supportNodes.Count; index++)
-        {
-            ParametricNode node = supportNodes[index];
-            if (!nodePointNames.TryGetValue(node.Id, out string? pointName) || string.IsNullOrWhiteSpace(pointName))
-            {
-                warnings.Add($"Skipped support restraint for node '{node.Id}': ETABS point name was not found.");
-                continue;
-            }
+        var supportGroups = supportNodes
+            .GroupBy(node => string.IsNullOrWhiteSpace(node.SupportGroupId) ? "__default" : node.SupportGroupId, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(group => group.Min(node => node.Y))
+            .ThenBy(group => group.Key, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-            bool[] restraints = BuildPointRestraints(model.SupportRestraintType, index == 0);
-            TrySetPointRestraint(sapModel, pointName, restraints, $"support node '{node.Id}'", warnings);
+        foreach (IGrouping<string, ParametricNode> supportGroup in supportGroups)
+        {
+            List<ParametricNode> orderedSupportNodes = supportGroup
+                .OrderBy(node => node.PreviewX)
+                .ThenBy(node => node.Id, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+
+            for (int index = 0; index < orderedSupportNodes.Count; index++)
+            {
+                ParametricNode node = orderedSupportNodes[index];
+                if (!nodePointNames.TryGetValue(node.Id, out string? pointName) || string.IsNullOrWhiteSpace(pointName))
+                {
+                    warnings.Add($"Skipped support restraint for node '{node.Id}': ETABS point name was not found.");
+                    continue;
+                }
+
+                bool[] restraints = BuildPointRestraints(model.SupportRestraintType, index == 0);
+                string supportDescription = supportGroup.Key == "__default"
+                    ? $"support node '{node.Id}'"
+                    : $"support node '{node.Id}' in bay '{supportGroup.Key}'";
+                TrySetPointRestraint(sapModel, pointName, restraints, supportDescription, warnings);
+            }
         }
     }
 

@@ -80,6 +80,7 @@ public sealed class TrussPreviewControl : FrameworkElement
         DrawDimensions(drawingContext, model, originX, originY, usedWidth, usedHeight);
         DrawLegend(drawingContext, ActualWidth, model);
         DrawLoadLabels(drawingContext, loadSummaries);
+        DrawBayPlanInset(drawingContext, model, ActualWidth, ActualHeight);
     }
 
     private static void DrawGrid(DrawingContext dc, double x, double y, double width, double height)
@@ -212,11 +213,11 @@ public sealed class TrussPreviewControl : FrameworkElement
     private static List<LoadPreviewSummary> BuildLoadSummaries(ParametricTrussModel model, Dictionary<string, ParametricNode> nodes)
     {
         var summaries = new List<LoadPreviewSummary>();
-        double span = Math.Max(model.Span, 0.000001);
+        double loadTributaryLength = Math.Max(model.Span * Math.Max(1, model.YBayCount), 0.000001);
 
-        AddNodeLoadSummary(summaries, model, nodes, true, span);
+        AddNodeLoadSummary(summaries, model, nodes, true, loadTributaryLength);
         AddMemberGroupLoadSummary(summaries, model, ParametricMemberGroups.TopChord, "Top");
-        AddNodeLoadSummary(summaries, model, nodes, false, span);
+        AddNodeLoadSummary(summaries, model, nodes, false, loadTributaryLength);
         AddMemberGroupLoadSummary(summaries, model, ParametricMemberGroups.BottomChord, "Bottom");
 
         return summaries;
@@ -326,7 +327,87 @@ public sealed class TrussPreviewControl : FrameworkElement
         dc.DrawLine(pen, new Point(dimX - 6, y + height), new Point(dimX + 6, y + height));
         DrawText(dc, $"Height {model.Height:0.###} m", new Point(dimX - 20, y + height / 2.0 - 8), 12, Brushes.SlateGray);
 
-        DrawText(dc, $"{model.TrussId} / {model.TrussType} / {model.PanelCount} panels", new Point(18, 10), 13, Brushes.DimGray);
+        string bayText = model.YBayCount > 1
+            ? $" / {model.YBayCount} Y bays @ {model.YBaySpacing:0.###} m"
+            : "";
+        string orthogonalText = model.OrthogonalYZTrussLineCount > 0
+            ? $" / {model.OrthogonalYZTrussLineCount} Y-Z lines / {model.OrthogonalYZPanelsPerBay} panels per Y bay"
+            : "";
+        DrawText(dc, $"{model.TrussId} / {model.TrussType} / {model.PanelCount} panels{bayText}{orthogonalText}", new Point(18, 10), 13, Brushes.DimGray);
+    }
+
+    private static void DrawBayPlanInset(DrawingContext dc, ParametricTrussModel model, double actualWidth, double actualHeight)
+    {
+        if (model.YBayCount <= 1)
+            return;
+
+        const double width = 176;
+        double height = Math.Clamp(54 + model.YBayCount * 9.0, 86, 150);
+        double x = Math.Max(18, actualWidth - width - 18);
+        double y = Math.Max(54, actualHeight - height - 18);
+        var background = new Rect(x, y, width, height);
+        dc.DrawRoundedRectangle(
+            new SolidColorBrush(Color.FromArgb(236, 255, 255, 255)),
+            new Pen(new SolidColorBrush(Color.FromRgb(203, 213, 225)), 1),
+            background,
+            6,
+            6);
+
+        string title = model.OrthogonalYZTrussLineCount > 0
+            ? $"Plan: {model.YBayCount} X-Z + {model.OrthogonalYZTrussLineCount} Y-Z"
+            : $"Plan: {model.YBayCount} X-Z bays";
+        DrawText(dc, title, new Point(x + 10, y + 8), 11.5, Brushes.DimGray);
+        string spacingText = model.OrthogonalYZTrussLineCount > 0
+            ? $"spacing {model.YBaySpacing:0.###} m / Y-Z {model.OrthogonalYZPanelsPerBay}p"
+            : $"spacing {model.YBaySpacing:0.###} m";
+        DrawText(dc, spacingText, new Point(x + 10, y + 25), 11, Brushes.SlateGray);
+
+        double lineLeft = x + 18;
+        double lineRight = x + width - 28;
+        double lineTop = y + 50;
+        double lineBottom = y + height - 18;
+        double availableHeight = Math.Max(1, lineBottom - lineTop);
+        var bayPen = new Pen(new SolidColorBrush(Color.FromRgb(37, 99, 235)), 2.0);
+        var orthogonalPen = new Pen(new SolidColorBrush(Color.FromRgb(217, 119, 6)), 1.8);
+        var supportPen = new Pen(new SolidColorBrush(Color.FromRgb(14, 116, 144)), 1.2);
+
+        for (int index = 0; index < model.YBayCount; index++)
+        {
+            double t = model.YBayCount == 1 ? 0.0 : index / (double)(model.YBayCount - 1);
+            double lineY = lineTop + t * availableHeight;
+            dc.DrawLine(bayPen, new Point(lineLeft, lineY), new Point(lineRight, lineY));
+            dc.DrawLine(supportPen, new Point(lineLeft, lineY - 4), new Point(lineLeft, lineY + 4));
+            dc.DrawLine(supportPen, new Point(lineRight, lineY - 4), new Point(lineRight, lineY + 4));
+        }
+
+        if (model.GenerateOrthogonalYZTrusses && model.OrthogonalYZTrussLineCount > 0)
+        {
+            foreach (int stationIndex in BuildOrthogonalXStationIndices(model.PanelCount, model.OrthogonalYZPlacementMode))
+            {
+                double t = model.PanelCount <= 0 ? 0.0 : stationIndex / (double)model.PanelCount;
+                double lineX = lineLeft + t * Math.Max(1, lineRight - lineLeft);
+                dc.DrawLine(orthogonalPen, new Point(lineX, lineTop), new Point(lineX, lineBottom));
+
+                if (model.OrthogonalYZPanelsPerBay > 1)
+                {
+                    for (int bayIndex = 0; bayIndex < model.YBayCount - 1; bayIndex++)
+                    {
+                        for (int panelIndex = 1; panelIndex < model.OrthogonalYZPanelsPerBay; panelIndex++)
+                        {
+                            double panelT = (bayIndex + panelIndex / (double)model.OrthogonalYZPanelsPerBay) / Math.Max(1, model.YBayCount - 1);
+                            double tickY = lineTop + panelT * availableHeight;
+                            dc.DrawEllipse(Brushes.White, orthogonalPen, new Point(lineX, tickY), 2.5, 2.5);
+                        }
+                    }
+                }
+            }
+        }
+
+        var axisPen = new Pen(new SolidColorBrush(Color.FromRgb(100, 116, 139)), 1);
+        dc.DrawLine(axisPen, new Point(lineLeft, lineBottom + 7), new Point(lineRight, lineBottom + 7));
+        dc.DrawLine(axisPen, new Point(lineLeft - 8, lineTop), new Point(lineLeft - 8, lineBottom));
+        DrawText(dc, "X", new Point(lineRight + 5, lineBottom - 2), 10.5, Brushes.SlateGray);
+        DrawText(dc, "Y", new Point(lineLeft - 14, lineTop - 17), 10.5, Brushes.SlateGray);
     }
 
     private static void DrawLegend(DrawingContext dc, double actualWidth, ParametricTrussModel model)
@@ -366,6 +447,11 @@ public sealed class TrussPreviewControl : FrameworkElement
             ParametricMemberGroups.Diagonal => Color.FromRgb(220, 38, 38),
             ParametricMemberGroups.Vertical => Color.FromRgb(5, 150, 105),
             ParametricMemberGroups.EndPost => Color.FromRgb(124, 58, 237),
+            ParametricMemberGroups.YZTopChord => Color.FromRgb(245, 158, 11),
+            ParametricMemberGroups.YZBottomChord => Color.FromRgb(180, 83, 9),
+            ParametricMemberGroups.YZDiagonal => Color.FromRgb(234, 88, 12),
+            ParametricMemberGroups.YZVertical => Color.FromRgb(202, 138, 4),
+            ParametricMemberGroups.YZEndPost => Color.FromRgb(161, 98, 7),
             ParametricMemberGroups.Secondary => Color.FromRgb(217, 119, 6),
             ParametricMemberGroups.InnerStringer => Color.FromRgb(37, 99, 235),
             ParametricMemberGroups.OuterStringer => Color.FromRgb(5, 150, 105),
@@ -375,6 +461,29 @@ public sealed class TrussPreviewControl : FrameworkElement
             "TreadShell" => Color.FromRgb(245, 158, 11),
             _ => Color.FromRgb(30, 41, 59)
         };
+    }
+
+    private static List<int> BuildOrthogonalXStationIndices(int panelCount, OrthogonalTrussPlacementMode placementMode)
+    {
+        int clampedPanelCount = Math.Max(2, panelCount);
+        return placementMode switch
+        {
+            OrthogonalTrussPlacementMode.EndLinesOnly => [0, clampedPanelCount],
+            OrthogonalTrussPlacementMode.EveryOtherPanelPoint => BuildEveryOtherPanelStationIndices(clampedPanelCount),
+            _ => Enumerable.Range(0, clampedPanelCount + 1).ToList()
+        };
+    }
+
+    private static List<int> BuildEveryOtherPanelStationIndices(int panelCount)
+    {
+        var indices = new List<int>();
+        for (int index = 0; index <= panelCount; index += 2)
+            indices.Add(index);
+
+        if (indices[^1] != panelCount)
+            indices.Add(panelCount);
+
+        return indices;
     }
 
     private static void DrawText(DrawingContext dc, string text, Point point, double fontSize, Brush brush)

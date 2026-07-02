@@ -11,6 +11,12 @@ public sealed class ParametricTrussOptions
     public ModelPoint3d EndPoint { get; set; } = new() { X = 12 };
     public double Height { get; set; } = 2.5;
     public int PanelCount { get; set; } = 6;
+    public int YBayCount { get; set; } = 1;
+    public double YBaySpacing { get; set; } = 3.0;
+    public bool GenerateOrthogonalYZTrusses { get; set; }
+    public TrussType OrthogonalYZTrussType { get; set; } = TrussType.Warren;
+    public OrthogonalTrussPlacementMode OrthogonalYZPlacementMode { get; set; } = OrthogonalTrussPlacementMode.EveryPanelPoint;
+    public int OrthogonalYZPanelsPerBay { get; set; } = 1;
     public double RoofSlopePercent { get; set; }
     public double BottomChordSlopePercent { get; set; }
     public ChordSlopeMode TopChordSlopeMode { get; set; } = ChordSlopeMode.Pitch;
@@ -85,6 +91,8 @@ public sealed class ParametricTrussGenerator
 
         string trussId = EtabsNameUtility.BuildSafeName("", options.TrussId, 24);
         int panelCount = Math.Max(2, options.PanelCount);
+        int yBayCount = Math.Clamp(options.YBayCount, 1, 40);
+        double yBaySpacing = double.IsFinite(options.YBaySpacing) ? Math.Max(0.001, options.YBaySpacing) : 3.0;
         double height = double.IsFinite(options.Height) ? Math.Max(0, options.Height) : 0;
         ModelPoint3d start = options.StartPoint.Clone();
         ModelPoint3d end = options.EndPoint.Clone();
@@ -110,6 +118,12 @@ public sealed class ParametricTrussGenerator
             Span = span,
             Height = height,
             PanelCount = panelCount,
+            YBayCount = yBayCount,
+            YBaySpacing = yBaySpacing,
+            GenerateOrthogonalYZTrusses = options.GenerateOrthogonalYZTrusses,
+            OrthogonalYZTrussType = ToStandardTrussType(options.OrthogonalYZTrussType),
+            OrthogonalYZPlacementMode = options.OrthogonalYZPlacementMode,
+            OrthogonalYZPanelsPerBay = Math.Clamp(options.OrthogonalYZPanelsPerBay, 1, 40),
             RoofSlopePercent = options.RoofSlopePercent,
             BottomChordSlopePercent = options.BottomChordSlopePercent,
             TopChordSlopeMode = options.TopChordSlopeMode,
@@ -229,6 +243,14 @@ public sealed class ParametricTrussGenerator
         AssignMemberSections(model);
 
         AddLoads(model, options);
+        ApplyYBayArray(model, yBayCount, yBaySpacing);
+        AddOrthogonalYZTrusses(
+            model,
+            trussId,
+            options.GenerateOrthogonalYZTrusses,
+            ToStandardTrussType(options.OrthogonalYZTrussType),
+            options.OrthogonalYZPlacementMode,
+            options.OrthogonalYZPanelsPerBay);
         return model;
     }
 
@@ -359,6 +381,433 @@ public sealed class ParametricTrussGenerator
             if (model.SectionAssignments.TryGetValue(member.Group, out string? sectionName))
                 member.SectionName = sectionName;
         }
+    }
+
+    private static void ApplyYBayArray(ParametricTrussModel model, int yBayCount, double yBaySpacing)
+    {
+        model.YBayCount = Math.Clamp(yBayCount, 1, 40);
+        model.YBaySpacing = double.IsFinite(yBaySpacing) ? Math.Max(0.001, yBaySpacing) : 3.0;
+
+        if (model.YBayCount <= 1)
+            return;
+
+        if (Math.Abs(model.EndPoint.Y - model.StartPoint.Y) > 0.000001)
+            model.Warnings.Add("Y bay duplication offsets each copy in global Y, but the selected truss span already has a Y component. Verify the plan layout before analysis.");
+
+        foreach (ParametricNode node in model.Nodes)
+            node.SupportGroupId = FormatYBayId(0);
+
+        List<ParametricNode> baseNodes = model.Nodes.Select(CloneNode).ToList();
+        List<ParametricMember> baseMembers = model.Members.Select(CloneMember).ToList();
+        List<ParametricShell> baseShells = model.Shells.Select(CloneShell).ToList();
+        List<ParametricLoad> baseNodeLoads = model.Loads
+            .Where(load => load.TargetType.Equals("Node", StringComparison.OrdinalIgnoreCase))
+            .Select(CloneLoad)
+            .ToList();
+
+        for (int bayIndex = 1; bayIndex < model.YBayCount; bayIndex++)
+        {
+            string supportGroupId = FormatYBayId(bayIndex);
+            double offsetY = model.YBaySpacing * bayIndex;
+
+            foreach (ParametricNode node in baseNodes)
+            {
+                ParametricNode clone = CloneNode(node);
+                clone.Id = BuildYBayScopedId(node.Id, bayIndex);
+                clone.Y = node.Y + offsetY;
+                clone.SupportGroupId = supportGroupId;
+                model.Nodes.Add(clone);
+            }
+
+            foreach (ParametricMember member in baseMembers)
+            {
+                ParametricMember clone = CloneMember(member);
+                clone.Id = BuildYBayScopedId(member.Id, bayIndex);
+                clone.StartNodeId = BuildYBayScopedId(member.StartNodeId, bayIndex);
+                clone.EndNodeId = BuildYBayScopedId(member.EndNodeId, bayIndex);
+                model.Members.Add(clone);
+            }
+
+            foreach (ParametricShell shell in baseShells)
+            {
+                ParametricShell clone = CloneShell(shell);
+                clone.Id = BuildYBayScopedId(shell.Id, bayIndex);
+                clone.NodeIds = shell.NodeIds
+                    .Select(nodeId => BuildYBayScopedId(nodeId, bayIndex))
+                    .ToList();
+                model.Shells.Add(clone);
+            }
+
+            foreach (ParametricLoad load in baseNodeLoads)
+            {
+                ParametricLoad clone = CloneLoad(load);
+                clone.Id = BuildYBayScopedId(load.Id, bayIndex);
+                clone.TargetId = BuildYBayScopedId(load.TargetId, bayIndex);
+                model.Loads.Add(clone);
+            }
+        }
+    }
+
+    private static ParametricNode CloneNode(ParametricNode node)
+    {
+        return new ParametricNode
+        {
+            Id = node.Id,
+            X = node.X,
+            Y = node.Y,
+            Z = node.Z,
+            PreviewX = node.PreviewX,
+            PreviewZ = node.PreviewZ,
+            IsSupport = node.IsSupport,
+            IsTopChord = node.IsTopChord,
+            IsBottomChord = node.IsBottomChord,
+            SupportGroupId = node.SupportGroupId
+        };
+    }
+
+    private static ParametricMember CloneMember(ParametricMember member)
+    {
+        return new ParametricMember
+        {
+            Id = member.Id,
+            StartNodeId = member.StartNodeId,
+            EndNodeId = member.EndNodeId,
+            Group = member.Group,
+            SectionName = member.SectionName,
+            ReleaseMoments = member.ReleaseMoments
+        };
+    }
+
+    private static ParametricShell CloneShell(ParametricShell shell)
+    {
+        return new ParametricShell
+        {
+            Id = shell.Id,
+            NodeIds = shell.NodeIds.ToList(),
+            Group = shell.Group,
+            ShellPropertyName = shell.ShellPropertyName
+        };
+    }
+
+    private static ParametricLoad CloneLoad(ParametricLoad load)
+    {
+        return new ParametricLoad
+        {
+            Id = load.Id,
+            LoadPattern = load.LoadPattern,
+            TargetType = load.TargetType,
+            TargetId = load.TargetId,
+            Direction = load.Direction,
+            Magnitude = load.Magnitude
+        };
+    }
+
+    private static string BuildYBayScopedId(string id, int bayIndex)
+    {
+        return EtabsNameUtility.BuildSafeName("", $"{id}_{FormatYBayId(bayIndex)}");
+    }
+
+    private static string FormatYBayId(int bayIndex)
+    {
+        return $"YB{bayIndex + 1:00}";
+    }
+
+    private static void AddOrthogonalYZTrusses(
+        ParametricTrussModel model,
+        string trussId,
+        bool generate,
+        TrussType trussType,
+        OrthogonalTrussPlacementMode placementMode,
+        int panelsPerBay)
+    {
+        model.GenerateOrthogonalYZTrusses = generate;
+        model.OrthogonalYZTrussType = ToStandardTrussType(trussType);
+        model.OrthogonalYZPlacementMode = placementMode;
+        model.OrthogonalYZPanelsPerBay = Math.Clamp(panelsPerBay, 1, 40);
+        model.OrthogonalYZTrussLineCount = 0;
+
+        if (!generate)
+            return;
+
+        if (model.YBayCount < 2)
+        {
+            model.Warnings.Add("Orthogonal Y-Z trusses require at least 2 Y bay lines.");
+            return;
+        }
+
+        CopySectionAssignment(model, ParametricMemberGroups.TopChord, ParametricMemberGroups.YZTopChord);
+        CopySectionAssignment(model, ParametricMemberGroups.BottomChord, ParametricMemberGroups.YZBottomChord);
+        CopySectionAssignment(model, ParametricMemberGroups.Diagonal, ParametricMemberGroups.YZDiagonal);
+        CopySectionAssignment(model, ParametricMemberGroups.Vertical, ParametricMemberGroups.YZVertical);
+        CopySectionAssignment(model, ParametricMemberGroups.EndPost, ParametricMemberGroups.YZEndPost);
+
+        var nodesById = model.Nodes.ToDictionary(node => node.Id, StringComparer.OrdinalIgnoreCase);
+        List<int> xStationIndices = BuildOrthogonalXStationIndices(model.PanelCount, placementMode);
+        int yPanelCount = (model.YBayCount - 1) * model.OrthogonalYZPanelsPerBay;
+
+        foreach (int xIndex in xStationIndices)
+        {
+            if (!HasRequiredOrthogonalBoundaryNodes(nodesById, xIndex, model.YBayCount))
+            {
+                model.Warnings.Add($"Skipped Y-Z truss at X panel point {xIndex}: matching X-Z chord nodes were not available.");
+                continue;
+            }
+
+            string lineTrussId = EtabsNameUtility.BuildSafeName("", $"{trussId}_YZ_X{xIndex:00}", 36);
+            var counters = ParametricMemberGroups.All.ToDictionary(group => group, _ => 0, StringComparer.OrdinalIgnoreCase);
+            List<string> bottomNodeIds = [];
+            List<string> topNodeIds = [];
+
+            for (int stationIndex = 0; stationIndex <= yPanelCount; stationIndex++)
+            {
+                bottomNodeIds.Add(GetOrCreateOrthogonalYZChordNode(model, nodesById, lineTrussId, xIndex, stationIndex, model.OrthogonalYZPanelsPerBay, isTop: false));
+                topNodeIds.Add(GetOrCreateOrthogonalYZChordNode(model, nodesById, lineTrussId, xIndex, stationIndex, model.OrthogonalYZPanelsPerBay, isTop: true));
+            }
+
+            for (int panelIndex = 0; panelIndex < yPanelCount; panelIndex++)
+            {
+                AddMember(
+                    model,
+                    lineTrussId,
+                    ParametricMemberGroups.YZBottomChord,
+                    bottomNodeIds[panelIndex],
+                    bottomNodeIds[panelIndex + 1],
+                    counters);
+                AddMember(
+                    model,
+                    lineTrussId,
+                    ParametricMemberGroups.YZTopChord,
+                    topNodeIds[panelIndex],
+                    topNodeIds[panelIndex + 1],
+                    counters);
+            }
+
+            AddMember(
+                model,
+                lineTrussId,
+                ParametricMemberGroups.YZEndPost,
+                bottomNodeIds[0],
+                topNodeIds[0],
+                counters);
+            AddMember(
+                model,
+                lineTrussId,
+                ParametricMemberGroups.YZEndPost,
+                bottomNodeIds[yPanelCount],
+                topNodeIds[yPanelCount],
+                counters);
+
+            if (model.OrthogonalYZTrussType == TrussType.K)
+            {
+                for (int panelIndex = 1; panelIndex < yPanelCount; panelIndex++)
+                {
+                    AddMember(
+                        model,
+                        lineTrussId,
+                        ParametricMemberGroups.YZVertical,
+                        bottomNodeIds[panelIndex],
+                        topNodeIds[panelIndex],
+                        counters);
+                }
+
+                for (int panelIndex = 0; panelIndex < yPanelCount; panelIndex++)
+                {
+                    string midNodeId = GetOrCreateOrthogonalKMidNode(model, nodesById, lineTrussId, panelIndex, bottomNodeIds, topNodeIds);
+
+                    AddMember(model, lineTrussId, ParametricMemberGroups.YZDiagonal, bottomNodeIds[panelIndex], midNodeId, counters);
+                    AddMember(model, lineTrussId, ParametricMemberGroups.YZDiagonal, topNodeIds[panelIndex], midNodeId, counters);
+                    AddMember(model, lineTrussId, ParametricMemberGroups.YZDiagonal, midNodeId, bottomNodeIds[panelIndex + 1], counters);
+                    AddMember(model, lineTrussId, ParametricMemberGroups.YZDiagonal, midNodeId, topNodeIds[panelIndex + 1], counters);
+                }
+            }
+            else
+            {
+                for (int panelIndex = 1; panelIndex < yPanelCount; panelIndex++)
+                {
+                    AddMember(
+                        model,
+                        lineTrussId,
+                        ParametricMemberGroups.YZVertical,
+                        bottomNodeIds[panelIndex],
+                        topNodeIds[panelIndex],
+                        counters);
+                }
+
+                if (model.OrthogonalYZTrussType != TrussType.SimpleFrame)
+                {
+                    for (int panelIndex = 0; panelIndex < yPanelCount; panelIndex++)
+                    {
+                        (string Start, string End) diagonal = model.OrthogonalYZTrussType switch
+                        {
+                            TrussType.Warren => panelIndex % 2 == 0
+                                ? (bottomNodeIds[panelIndex], topNodeIds[panelIndex + 1])
+                                : (topNodeIds[panelIndex], bottomNodeIds[panelIndex + 1]),
+                            TrussType.Pratt => panelIndex < yPanelCount / 2.0
+                                ? (bottomNodeIds[panelIndex], topNodeIds[panelIndex + 1])
+                                : (topNodeIds[panelIndex], bottomNodeIds[panelIndex + 1]),
+                            TrussType.Howe => panelIndex < yPanelCount / 2.0
+                                ? (topNodeIds[panelIndex], bottomNodeIds[panelIndex + 1])
+                                : (bottomNodeIds[panelIndex], topNodeIds[panelIndex + 1]),
+                            _ => (bottomNodeIds[panelIndex], topNodeIds[panelIndex + 1])
+                        };
+
+                        AddMember(model, lineTrussId, ParametricMemberGroups.YZDiagonal, diagonal.Start, diagonal.End, counters);
+                    }
+                }
+            }
+
+            AssignMemberSections(model);
+            model.OrthogonalYZTrussLineCount++;
+        }
+    }
+
+    private static bool HasRequiredOrthogonalBoundaryNodes(
+        IReadOnlyDictionary<string, ParametricNode> nodesById,
+        int xIndex,
+        int yBayLineCount)
+    {
+        for (int bayLineIndex = 0; bayLineIndex < yBayLineCount; bayLineIndex++)
+        {
+            if (!nodesById.ContainsKey(ExistingYBayNodeId(BottomNodeId(xIndex), bayLineIndex)) ||
+                !nodesById.ContainsKey(ExistingYBayNodeId(TopNodeId(xIndex), bayLineIndex)))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static string GetOrCreateOrthogonalYZChordNode(
+        ParametricTrussModel model,
+        Dictionary<string, ParametricNode> nodesById,
+        string lineTrussId,
+        int xIndex,
+        int stationIndex,
+        int panelsPerBay,
+        bool isTop)
+    {
+        int bayLineIndex = stationIndex / panelsPerBay;
+        int localPanelIndex = stationIndex % panelsPerBay;
+        string baseNodeId = isTop ? TopNodeId(xIndex) : BottomNodeId(xIndex);
+        if (localPanelIndex == 0)
+            return ExistingYBayNodeId(baseNodeId, bayLineIndex);
+
+        string nodeId = BuildOrthogonalPanelNodeId(lineTrussId, isTop, stationIndex);
+        if (nodesById.ContainsKey(nodeId))
+            return nodeId;
+
+        ParametricNode start = nodesById[ExistingYBayNodeId(baseNodeId, bayLineIndex)];
+        ParametricNode end = nodesById[ExistingYBayNodeId(baseNodeId, bayLineIndex + 1)];
+        double t = localPanelIndex / (double)panelsPerBay;
+
+        var node = new ParametricNode
+        {
+            Id = nodeId,
+            X = start.X + (end.X - start.X) * t,
+            Y = start.Y + (end.Y - start.Y) * t,
+            Z = start.Z + (end.Z - start.Z) * t,
+            PreviewX = start.PreviewX + (end.PreviewX - start.PreviewX) * t,
+            PreviewZ = start.PreviewZ + (end.PreviewZ - start.PreviewZ) * t,
+            IsTopChord = isTop,
+            IsBottomChord = !isTop,
+            SupportGroupId = $"YZ_X{xIndex:00}"
+        };
+
+        model.Nodes.Add(node);
+        nodesById[node.Id] = node;
+        return node.Id;
+    }
+
+    private static string GetOrCreateOrthogonalKMidNode(
+        ParametricTrussModel model,
+        Dictionary<string, ParametricNode> nodesById,
+        string lineTrussId,
+        int panelIndex,
+        IReadOnlyList<string> bottomNodeIds,
+        IReadOnlyList<string> topNodeIds)
+    {
+        string midNodeId = BuildOrthogonalMidNodeId(lineTrussId, panelIndex);
+        if (nodesById.ContainsKey(midNodeId))
+            return midNodeId;
+
+        ParametricNode leftBottom = nodesById[bottomNodeIds[panelIndex]];
+        ParametricNode rightBottom = nodesById[bottomNodeIds[panelIndex + 1]];
+        ParametricNode leftTop = nodesById[topNodeIds[panelIndex]];
+        ParametricNode rightTop = nodesById[topNodeIds[panelIndex + 1]];
+
+        var node = new ParametricNode
+        {
+            Id = midNodeId,
+            X = (leftBottom.X + rightBottom.X + leftTop.X + rightTop.X) / 4.0,
+            Y = (leftBottom.Y + rightBottom.Y + leftTop.Y + rightTop.Y) / 4.0,
+            Z = (leftBottom.Z + rightBottom.Z + leftTop.Z + rightTop.Z) / 4.0,
+            PreviewX = (leftBottom.PreviewX + rightBottom.PreviewX + leftTop.PreviewX + rightTop.PreviewX) / 4.0,
+            PreviewZ = (leftBottom.PreviewZ + rightBottom.PreviewZ + leftTop.PreviewZ + rightTop.PreviewZ) / 4.0,
+            SupportGroupId = lineTrussId
+        };
+
+        model.Nodes.Add(node);
+        nodesById[node.Id] = node;
+        return node.Id;
+    }
+
+    private static string ExistingYBayNodeId(string baseNodeId, int bayIndex)
+    {
+        return bayIndex == 0 ? baseNodeId : BuildYBayScopedId(baseNodeId, bayIndex);
+    }
+
+    private static string BuildOrthogonalMidNodeId(string lineTrussId, int panelIndex)
+    {
+        return EtabsNameUtility.BuildSafeName("", $"{lineTrussId}_K_{panelIndex:000}");
+    }
+
+    private static string BuildOrthogonalPanelNodeId(string lineTrussId, bool isTop, int stationIndex)
+    {
+        string chordCode = isTop ? "T" : "B";
+        return EtabsNameUtility.BuildSafeName("", $"{lineTrussId}_{chordCode}Y_{stationIndex:000}");
+    }
+
+    private static List<int> BuildOrthogonalXStationIndices(int panelCount, OrthogonalTrussPlacementMode placementMode)
+    {
+        int clampedPanelCount = Math.Max(2, panelCount);
+        return placementMode switch
+        {
+            OrthogonalTrussPlacementMode.EndLinesOnly => [0, clampedPanelCount],
+            OrthogonalTrussPlacementMode.EveryOtherPanelPoint => BuildEveryOtherPanelStationIndices(clampedPanelCount),
+            _ => Enumerable.Range(0, clampedPanelCount + 1).ToList()
+        };
+    }
+
+    private static List<int> BuildEveryOtherPanelStationIndices(int panelCount)
+    {
+        var indices = new List<int>();
+        for (int index = 0; index <= panelCount; index += 2)
+            indices.Add(index);
+
+        if (indices[^1] != panelCount)
+            indices.Add(panelCount);
+
+        return indices;
+    }
+
+    private static void CopySectionAssignment(ParametricTrussModel model, string sourceGroup, string targetGroup)
+    {
+        model.SectionAssignments[targetGroup] = model.SectionAssignments.TryGetValue(sourceGroup, out string? sectionName)
+            ? sectionName
+            : "";
+    }
+
+    private static TrussType ToStandardTrussType(TrussType trussType)
+    {
+        return trussType switch
+        {
+            TrussType.Pratt => TrussType.Pratt,
+            TrussType.Howe => TrussType.Howe,
+            TrussType.K => TrussType.K,
+            TrussType.SimpleFrame => TrussType.SimpleFrame,
+            _ => TrussType.Warren
+        };
     }
 
     private ParametricTrussModel GenerateSpiralStaircase(ParametricTrussOptions options)
@@ -689,6 +1138,11 @@ public sealed class ParametricTrussGenerator
             ParametricMemberGroups.Diagonal => "DIAG",
             ParametricMemberGroups.Vertical => "VERT",
             ParametricMemberGroups.EndPost => "END",
+            ParametricMemberGroups.YZTopChord => "YZTOP",
+            ParametricMemberGroups.YZBottomChord => "YZBOT",
+            ParametricMemberGroups.YZDiagonal => "YZDIAG",
+            ParametricMemberGroups.YZVertical => "YZVERT",
+            ParametricMemberGroups.YZEndPost => "YZEND",
             ParametricMemberGroups.InnerStringer => "IN",
             ParametricMemberGroups.OuterStringer => "OUT",
             ParametricMemberGroups.RadialTread => "RAD",

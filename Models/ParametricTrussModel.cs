@@ -77,6 +77,13 @@ public enum VariablePanelWidthVariation
     LinearToMiddle
 }
 
+public enum OrthogonalTrussPlacementMode
+{
+    EveryPanelPoint,
+    EndLinesOnly,
+    EveryOtherPanelPoint
+}
+
 public static class ParametricMemberGroups
 {
     public const string TopChord = "TopChord";
@@ -84,6 +91,11 @@ public static class ParametricMemberGroups
     public const string Diagonal = "Diagonal";
     public const string Vertical = "Vertical";
     public const string EndPost = "EndPost";
+    public const string YZTopChord = "YZTopChord";
+    public const string YZBottomChord = "YZBottomChord";
+    public const string YZDiagonal = "YZDiagonal";
+    public const string YZVertical = "YZVertical";
+    public const string YZEndPost = "YZEndPost";
     public const string Secondary = "Secondary";
     public const string InnerStringer = "InnerStringer";
     public const string OuterStringer = "OuterStringer";
@@ -98,6 +110,11 @@ public static class ParametricMemberGroups
         Diagonal,
         Vertical,
         EndPost,
+        YZTopChord,
+        YZBottomChord,
+        YZDiagonal,
+        YZVertical,
+        YZEndPost,
         Secondary,
         InnerStringer,
         OuterStringer,
@@ -140,6 +157,7 @@ public sealed class ParametricNode
     public bool IsSupport { get; set; }
     public bool IsTopChord { get; set; }
     public bool IsBottomChord { get; set; }
+    public string SupportGroupId { get; set; } = "";
 }
 
 public sealed class ParametricMember
@@ -243,6 +261,13 @@ public sealed class ParametricTrussModel
     public int PanelCount { get; set; }
     public double RoofSlopePercent { get; set; }
     public double BottomChordSlopePercent { get; set; }
+    public int YBayCount { get; set; } = 1;
+    public double YBaySpacing { get; set; }
+    public bool GenerateOrthogonalYZTrusses { get; set; }
+    public TrussType OrthogonalYZTrussType { get; set; } = TrussType.Warren;
+    public OrthogonalTrussPlacementMode OrthogonalYZPlacementMode { get; set; } = OrthogonalTrussPlacementMode.EveryPanelPoint;
+    public int OrthogonalYZPanelsPerBay { get; set; } = 1;
+    public int OrthogonalYZTrussLineCount { get; set; }
     public ChordSlopeMode TopChordSlopeMode { get; set; } = ChordSlopeMode.Pitch;
     public ChordSlopeMode BottomChordSlopeMode { get; set; } = ChordSlopeMode.Pitch;
     public SupportNodeMode SupportNodeMode { get; set; } = SupportNodeMode.EndBottomNodes;

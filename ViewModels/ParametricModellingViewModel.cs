@@ -30,6 +30,12 @@ public sealed class ParametricModellingViewModel : ObservableObject
     private double _manualSpan = 12.0;
     private double _height = 2.5;
     private int _panelCount = 6;
+    private int _yBayCount = 1;
+    private double _yBaySpacing = 3.0;
+    private bool _generateOrthogonalYZTrusses;
+    private string _selectedOrthogonalYZTrussType = OrthogonalYZTrussTypeLabels.SameAsXZ;
+    private string _selectedOrthogonalYZPlacementMode = OrthogonalYZPlacementLabels.EveryPanelPoint;
+    private int _orthogonalYZPanelsPerBay = 1;
     private double _spiralCentreX;
     private double _spiralCentreY;
     private double _spiralBaseZ;
@@ -191,6 +197,21 @@ public sealed class ParametricModellingViewModel : ObservableObject
         TrussTypeLabels.SpiralStaircase,
         TrussTypeLabels.FishBellyTruss,
         TrussTypeLabels.VariablePanelWidthTruss
+    ];
+    public IReadOnlyList<string> OrthogonalYZTrussTypes { get; } =
+    [
+        OrthogonalYZTrussTypeLabels.SameAsXZ,
+        TrussType.Warren.ToString(),
+        TrussType.Pratt.ToString(),
+        TrussType.Howe.ToString(),
+        TrussType.K.ToString(),
+        TrussType.SimpleFrame.ToString()
+    ];
+    public IReadOnlyList<string> OrthogonalYZPlacementModes { get; } =
+    [
+        OrthogonalYZPlacementLabels.EveryPanelPoint,
+        OrthogonalYZPlacementLabels.EndLinesOnly,
+        OrthogonalYZPlacementLabels.EveryOtherPanelPoint
     ];
     public IReadOnlyList<string> SlopeModes { get; } = Enum.GetNames(typeof(ChordSlopeMode));
     public IReadOnlyList<string> SpiralRotationDirections { get; } =
@@ -433,6 +454,69 @@ public sealed class ParametricModellingViewModel : ObservableObject
         {
             int next = Math.Clamp(value, 2, 60);
             if (SetProperty(ref _panelCount, next))
+                RegeneratePreview();
+        }
+    }
+
+    public int YBayCount
+    {
+        get => _yBayCount;
+        set
+        {
+            int next = Math.Clamp(value, 1, 40);
+            if (SetProperty(ref _yBayCount, next))
+                RegeneratePreview();
+        }
+    }
+
+    public double YBaySpacing
+    {
+        get => _yBaySpacing;
+        set
+        {
+            double next = double.IsFinite(value) ? Math.Max(0.001, RoundToGeometryStep(value)) : 3.0;
+            if (SetProperty(ref _yBaySpacing, next))
+                RegeneratePreview();
+        }
+    }
+
+    public bool GenerateOrthogonalYZTrusses
+    {
+        get => _generateOrthogonalYZTrusses;
+        set
+        {
+            if (SetProperty(ref _generateOrthogonalYZTrusses, value))
+                RegeneratePreview();
+        }
+    }
+
+    public string SelectedOrthogonalYZTrussType
+    {
+        get => _selectedOrthogonalYZTrussType;
+        set
+        {
+            if (SetProperty(ref _selectedOrthogonalYZTrussType, value ?? OrthogonalYZTrussTypeLabels.SameAsXZ))
+                RegeneratePreview();
+        }
+    }
+
+    public string SelectedOrthogonalYZPlacementMode
+    {
+        get => _selectedOrthogonalYZPlacementMode;
+        set
+        {
+            if (SetProperty(ref _selectedOrthogonalYZPlacementMode, value ?? OrthogonalYZPlacementLabels.EveryPanelPoint))
+                RegeneratePreview();
+        }
+    }
+
+    public int OrthogonalYZPanelsPerBay
+    {
+        get => _orthogonalYZPanelsPerBay;
+        set
+        {
+            int next = Math.Clamp(value, 1, 40);
+            if (SetProperty(ref _orthogonalYZPanelsPerBay, next))
                 RegeneratePreview();
         }
     }
@@ -1086,6 +1170,22 @@ public sealed class ParametricModellingViewModel : ObservableObject
                 AddValidationIssue(validation, ValidationSeverity.Critical, "Variable middle panel width ratio must be greater than end panel width ratio.");
         }
 
+        if (IsStandardTrussType && GenerateOrthogonalYZTrusses)
+        {
+            if (YBayCount < 2)
+                AddValidationIssue(validation, ValidationSeverity.Critical, "Orthogonal Y-Z trusses require at least 2 Y bay lines.");
+
+            int yzLineCount = ToOrthogonalYZPlacementMode(SelectedOrthogonalYZPlacementMode) == OrthogonalTrussPlacementMode.EndLinesOnly
+                ? 2
+                : ToOrthogonalYZPlacementMode(SelectedOrthogonalYZPlacementMode) == OrthogonalTrussPlacementMode.EveryOtherPanelPoint
+                    ? (PanelCount / 2) + 1 + (PanelCount % 2 == 0 ? 0 : 1)
+                    : PanelCount + 1;
+
+            int approximateYZMembers = yzLineCount * Math.Max(1, YBayCount - 1) * Math.Max(1, OrthogonalYZPanelsPerBay) * 3;
+            if (approximateYZMembers > 300)
+                AddValidationIssue(validation, ValidationSeverity.Warning, "Orthogonal Y-Z truss count is high; ETABS drawing may take noticeable time.");
+        }
+
         if (validation.Issues.Count > issueCount)
         {
             validation.Issues.RemoveAll(issue =>
@@ -1438,6 +1538,12 @@ public sealed class ParametricModellingViewModel : ObservableObject
             EndPoint = end,
             Height = Height,
             PanelCount = PanelCount,
+            YBayCount = YBayCount,
+            YBaySpacing = YBaySpacing,
+            GenerateOrthogonalYZTrusses = GenerateOrthogonalYZTrusses && IsStandardTrussType,
+            OrthogonalYZTrussType = ToOrthogonalYZTrussType(SelectedOrthogonalYZTrussType, trussType),
+            OrthogonalYZPlacementMode = ToOrthogonalYZPlacementMode(SelectedOrthogonalYZPlacementMode),
+            OrthogonalYZPanelsPerBay = OrthogonalYZPanelsPerBay,
             RoofSlopePercent = RoofSlopePercent,
             BottomChordSlopePercent = BottomChordSlopePercent,
             TopChordSlopeMode = topSlopeMode,
@@ -1858,6 +1964,36 @@ public sealed class ParametricModellingViewModel : ObservableObject
         return Enum.TryParse(value, out TrussType trussType) ? trussType : TrussType.Warren;
     }
 
+    private static TrussType ToOrthogonalYZTrussType(string? value, TrussType currentTrussType)
+    {
+        if (string.Equals(value, OrthogonalYZTrussTypeLabels.SameAsXZ, StringComparison.OrdinalIgnoreCase))
+            return ToStandardTrussType(currentTrussType);
+
+        return ToStandardTrussType(ToTrussType(value));
+    }
+
+    private static TrussType ToStandardTrussType(TrussType trussType)
+    {
+        return trussType switch
+        {
+            TrussType.Pratt => TrussType.Pratt,
+            TrussType.Howe => TrussType.Howe,
+            TrussType.K => TrussType.K,
+            TrussType.SimpleFrame => TrussType.SimpleFrame,
+            _ => TrussType.Warren
+        };
+    }
+
+    private static OrthogonalTrussPlacementMode ToOrthogonalYZPlacementMode(string? value)
+    {
+        if (string.Equals(value, OrthogonalYZPlacementLabels.EndLinesOnly, StringComparison.OrdinalIgnoreCase))
+            return OrthogonalTrussPlacementMode.EndLinesOnly;
+        if (string.Equals(value, OrthogonalYZPlacementLabels.EveryOtherPanelPoint, StringComparison.OrdinalIgnoreCase))
+            return OrthogonalTrussPlacementMode.EveryOtherPanelPoint;
+
+        return OrthogonalTrussPlacementMode.EveryPanelPoint;
+    }
+
     private static SpiralStairRotationDirection ToSpiralRotationDirection(string? value)
     {
         return string.Equals(value, SpiralRotationDirectionLabels.Clockwise, StringComparison.OrdinalIgnoreCase)
@@ -1906,6 +2042,18 @@ public sealed class ParametricModellingViewModel : ObservableObject
         public const string SpiralStaircase = "Spiral Staircase";
         public const string FishBellyTruss = "Fish-Belly Truss";
         public const string VariablePanelWidthTruss = "Variable Panel Width Truss";
+    }
+
+    private static class OrthogonalYZTrussTypeLabels
+    {
+        public const string SameAsXZ = "Same as X-Z";
+    }
+
+    private static class OrthogonalYZPlacementLabels
+    {
+        public const string EveryPanelPoint = "Every X panel point";
+        public const string EndLinesOnly = "End X lines only";
+        public const string EveryOtherPanelPoint = "Every other X panel point";
     }
 
     private static class SpiralRotationDirectionLabels
