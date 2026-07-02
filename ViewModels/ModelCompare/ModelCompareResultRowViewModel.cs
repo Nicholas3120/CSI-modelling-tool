@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using CSIModellingTools.Models;
 
 namespace CSIModellingTools.ViewModels;
@@ -40,6 +41,10 @@ public sealed class ModelCompareResultRowViewModel : ModelCompareResultRow, INot
         NewEtabsObjectName = row.NewEtabsObjectName;
         OldObjectLocation = row.OldObjectLocation;
         NewObjectLocation = row.NewObjectLocation;
+        OldLabel = row.OldLabel;
+        NewLabel = row.NewLabel;
+        OldUid = row.OldUid;
+        NewUid = row.NewUid;
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -91,13 +96,13 @@ public sealed class ModelCompareResultRowViewModel : ModelCompareResultRow, INot
         {
             var values = new List<string>();
             if (CoordinateDifference.HasValue)
-                values.Add($"coord={CoordinateDifference.Value:0.###}");
+                values.Add($"coord={CoordinateDifference.Value.ToString("0.###", CultureInfo.InvariantCulture)}");
             if (MovementDistance.HasValue)
-                values.Add($"move={MovementDistance.Value:0.###}");
+                values.Add($"move={MovementDistance.Value.ToString("0.###", CultureInfo.InvariantCulture)}");
             if (LengthDifference.HasValue)
-                values.Add($"length={LengthDifference.Value:0.###}");
+                values.Add($"length={LengthDifference.Value.ToString("0.###", CultureInfo.InvariantCulture)}");
             if (OrientationDifferenceDegrees.HasValue)
-                values.Add($"angle={OrientationDifferenceDegrees.Value:0.###} deg");
+                values.Add($"angle={OrientationDifferenceDegrees.Value.ToString("0.###", CultureInfo.InvariantCulture)} deg");
             return string.Join(", ", values);
         }
     }

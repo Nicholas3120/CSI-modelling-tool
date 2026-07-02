@@ -105,4 +105,8 @@ public class ModelCompareResultRow
     public string NewEtabsObjectName { get; set; } = "";
     public string OldObjectLocation { get; set; } = "";
     public string NewObjectLocation { get; set; } = "";
+    public string OldLabel { get; set; } = "";
+    public string NewLabel { get; set; } = "";
+    public string OldUid { get; set; } = "";
+    public string NewUid { get; set; } = "";
 }

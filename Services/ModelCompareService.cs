@@ -225,50 +225,14 @@ public sealed class ModelCompareService
             ApplyFrameNavigationContext(results, resultStart, oldFrame, newFrame);
         }
 
+        // Identity is established only from the tracking ID and the geometry (exact, reversed, then near).
+        // Frame names are deliberately never used to match: ETABS reuses short names ("1".."24") for
+        // unrelated members after edits, so name matching produces false pairings.
         List<ModelCompareFrameSnapshot> unmatchedOldFrames = orderedOldFrames
             .Where((_, index) => !matchedOldIndexes.Contains(index))
             .ToList();
         List<ModelCompareFrameSnapshot> unmatchedNewFrames = orderedNewFrames
             .Where((_, index) => !matchedNewIndexes.Contains(index))
-            .ToList();
-
-        Dictionary<string, Queue<int>> unmatchedNewFramesByName = BuildFrameNameLookup(unmatchedNewFrames);
-        var sameNameMatchedOldIndexes = new HashSet<int>();
-        var sameNameMatchedNewIndexes = new HashSet<int>();
-        for (int oldIndex = 0; oldIndex < unmatchedOldFrames.Count; oldIndex++)
-        {
-            ModelCompareFrameSnapshot oldFrame = unmatchedOldFrames[oldIndex];
-            string oldFrameName = (oldFrame.FrameName ?? "").Trim();
-            if (oldFrameName.Length == 0 ||
-                !unmatchedNewFramesByName.TryGetValue(oldFrameName, out Queue<int>? matchingIndexes) ||
-                matchingIndexes.Count == 0)
-            {
-                continue;
-            }
-
-            int newIndex = matchingIndexes.Dequeue();
-            ModelCompareFrameSnapshot newFrame = unmatchedNewFrames[newIndex];
-            sameNameMatchedOldIndexes.Add(oldIndex);
-            sameNameMatchedNewIndexes.Add(newIndex);
-            int resultStart = results.Count;
-            AddFrameMovedDifference(oldFrame, newFrame, settings, ModelCompareConfidenceLevel.High, results);
-            CompareMatchedFrame(oldFrame, newFrame, settings, compareMaterialAssignments, results);
-            ApplyDiagnostics(results, resultStart, BuildFrameDiagnostics(
-                oldFrame,
-                newFrame,
-                ModelCompareMatchMethod.SameFrameName,
-                ModelCompareConfidenceLevel.High,
-                "Exact geometry did not match, but the ETABS frame name is unchanged.",
-                CalculateMidpointMovement(oldFrame, newFrame) <= settings.MovementTolerance ? 0.95 : 0.9));
-            ApplySearchContext(results, resultStart, BuildFrameSearchText(oldFrame, newFrame));
-            ApplyFrameNavigationContext(results, resultStart, oldFrame, newFrame);
-        }
-
-        unmatchedOldFrames = unmatchedOldFrames
-            .Where((_, index) => !sameNameMatchedOldIndexes.Contains(index))
-            .ToList();
-        unmatchedNewFrames = unmatchedNewFrames
-            .Where((_, index) => !sameNameMatchedNewIndexes.Contains(index))
             .ToList();
 
         long movedCandidateChecks = (long)unmatchedOldFrames.Count * unmatchedNewFrames.Count;
@@ -286,11 +250,11 @@ public sealed class ModelCompareService
         }
 
         string unmatchedOldReason = movedMatchingSkipped
-            ? "No exact-coordinate or same-name candidate was found; near-geometry matching was skipped by the candidate safety limit."
-            : "No exact-coordinate, same-name, or unique near-geometry candidate was found in the new snapshot.";
+            ? "No matching tracking ID or exact-coordinate candidate was found; near-geometry matching was skipped by the candidate safety limit."
+            : "No matching tracking ID, exact-coordinate, or near-geometry candidate was found in the new snapshot.";
         string unmatchedNewReason = movedMatchingSkipped
-            ? "No exact-coordinate or same-name candidate was found; near-geometry matching was skipped by the candidate safety limit."
-            : "No exact-coordinate, same-name, or unique near-geometry candidate was found in the old snapshot.";
+            ? "No matching tracking ID or exact-coordinate candidate was found; near-geometry matching was skipped by the candidate safety limit."
+            : "No matching tracking ID, exact-coordinate, or near-geometry candidate was found in the old snapshot.";
 
         foreach (ModelCompareFrameSnapshot oldFrame in unmatchedOldFrames)
         {
@@ -384,67 +348,449 @@ public sealed class ModelCompareService
         bool comparePropertyDetails,
         List<ModelCompareResultRow> results)
     {
-        Dictionary<string, Queue<ModelCompareAreaObjectSnapshot>> oldAreasByKey = BuildAreaLookup(oldAreas, settings.CoordinateTolerance);
-        Dictionary<string, Queue<ModelCompareAreaObjectSnapshot>> newAreasByKey = BuildAreaLookup(newAreas, settings.CoordinateTolerance);
-        var allKeys = new SortedSet<string>(oldAreasByKey.Keys, StringComparer.Ordinal);
-        allKeys.UnionWith(newAreasByKey.Keys);
+        List<ModelCompareAreaObjectSnapshot> orderedOld = oldAreas
+            .OrderBy(area => area.AreaName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        List<ModelCompareAreaObjectSnapshot> orderedNew = newAreas
+            .OrderBy(area => area.AreaName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var matchedOld = new HashSet<int>();
+        var matchedNew = new HashSet<int>();
 
-        foreach (string key in allKeys)
+        // Tier 1: persistent tracking ID. A shared area ID is the same slab even if it was reshaped or renamed.
+        var newByUid = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int index = 0; index < orderedNew.Count; index++)
         {
-            oldAreasByKey.TryGetValue(key, out Queue<ModelCompareAreaObjectSnapshot>? oldQueue);
-            newAreasByKey.TryGetValue(key, out Queue<ModelCompareAreaObjectSnapshot>? newQueue);
+            string uid = (orderedNew[index].Uid ?? "").Trim();
+            if (!string.IsNullOrWhiteSpace(uid))
+                newByUid.TryAdd(uid, index);
+        }
 
-            while ((oldQueue?.Count ?? 0) > 0 && (newQueue?.Count ?? 0) > 0)
+        for (int oldIndex = 0; oldIndex < orderedOld.Count; oldIndex++)
+        {
+            string uid = (orderedOld[oldIndex].Uid ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(uid) ||
+                !newByUid.TryGetValue(uid, out int newIndex) ||
+                matchedNew.Contains(newIndex))
             {
-                ModelCompareAreaObjectSnapshot oldArea = oldQueue!.Dequeue();
-                ModelCompareAreaObjectSnapshot newArea = newQueue!.Dequeue();
-                int resultStart = results.Count;
-                CompareMatchedArea(oldArea, newArea, settings, comparePropertyDetails, results);
-                ApplyDiagnostics(results, resultStart, new ComparisonDiagnostics(
-                    ModelCompareMatchMethod.ExactAreaGeometry,
-                    ModelCompareConfidenceLevel.High,
-                    1.0,
-                    $"Sorted area corner coordinates match within {FormatNumber(settings.CoordinateTolerance)}.",
-                    null,
-                    null,
-                    null,
-                    null));
-                ApplySearchContext(results, resultStart, BuildAreaSearchText(oldArea, newArea));
-                ApplyAreaNavigationContext(results, resultStart, oldArea, newArea);
+                continue;
             }
 
-            while ((oldQueue?.Count ?? 0) > 0)
+            matchedOld.Add(oldIndex);
+            matchedNew.Add(newIndex);
+            MatchAreaPair(orderedOld[oldIndex], orderedNew[newIndex], settings, comparePropertyDetails, results,
+                ModelCompareMatchMethod.PersistentId, "Matched by tool-owned area ID.");
+        }
+
+        // Tier 2: normalized geometric key (quantized, collinear edge nodes dropped, order-independent).
+        var newByGeometry = new Dictionary<string, Queue<int>>(StringComparer.Ordinal);
+        for (int index = 0; index < orderedNew.Count; index++)
+        {
+            if (matchedNew.Contains(index))
+                continue;
+
+            string key = BuildNormalizedAreaKey(orderedNew[index], settings.CoordinateTolerance);
+            if (key.Length == 0)
+                continue;
+
+            if (!newByGeometry.TryGetValue(key, out Queue<int>? queue))
             {
-                ModelCompareAreaObjectSnapshot oldArea = oldQueue!.Dequeue();
-                int resultStart = results.Count;
-                results.Add(BuildResult(
-                    ModelCompareChangeType.Removed,
-                    ModelCompareObjectType.Area,
-                    DescribeArea(oldArea),
-                    oldArea.AreaName,
-                    "",
-                    ModelCompareChangeImportance.High,
-                    diagnostics: BuildUnmatchedDiagnostics("No area with the same stable corner geometry was found in the new snapshot."),
-                    searchText: BuildAreaSearchText(oldArea, null)));
-                ApplyAreaNavigationContext(results, resultStart, oldArea, null);
+                queue = new Queue<int>();
+                newByGeometry[key] = queue;
             }
 
-            while ((newQueue?.Count ?? 0) > 0)
+            queue.Enqueue(index);
+        }
+
+        for (int oldIndex = 0; oldIndex < orderedOld.Count; oldIndex++)
+        {
+            if (matchedOld.Contains(oldIndex))
+                continue;
+
+            string key = BuildNormalizedAreaKey(orderedOld[oldIndex], settings.CoordinateTolerance);
+            if (key.Length == 0 || !newByGeometry.TryGetValue(key, out Queue<int>? queue) || queue.Count == 0)
+                continue;
+
+            int newIndex = queue.Dequeue();
+            matchedOld.Add(oldIndex);
+            matchedNew.Add(newIndex);
+            MatchAreaPair(orderedOld[oldIndex], orderedNew[newIndex], settings, comparePropertyDetails, results,
+                ModelCompareMatchMethod.ExactAreaGeometry, "Normalized area corner geometry matches.");
+        }
+
+        // Tier 3: coverage / re-partition. A slab split into several (or several merged into one) covers the
+        // same footprint on the same plane, so report it as a single re-partition instead of add + remove.
+        DetectAreaRepartitions(orderedOld, orderedNew, matchedOld, matchedNew, settings, comparePropertyDetails, results);
+
+        for (int oldIndex = 0; oldIndex < orderedOld.Count; oldIndex++)
+        {
+            if (matchedOld.Contains(oldIndex))
+                continue;
+
+            ModelCompareAreaObjectSnapshot oldArea = orderedOld[oldIndex];
+            int resultStart = results.Count;
+            results.Add(BuildResult(
+                ModelCompareChangeType.Removed,
+                ModelCompareObjectType.Area,
+                DescribeArea(oldArea),
+                oldArea.AreaName,
+                "",
+                ModelCompareChangeImportance.High,
+                diagnostics: BuildUnmatchedDiagnostics("No area with a matching ID or stable geometry was found in the new snapshot."),
+                searchText: BuildAreaSearchText(oldArea, null)));
+            ApplyAreaNavigationContext(results, resultStart, oldArea, null);
+        }
+
+        for (int newIndex = 0; newIndex < orderedNew.Count; newIndex++)
+        {
+            if (matchedNew.Contains(newIndex))
+                continue;
+
+            ModelCompareAreaObjectSnapshot newArea = orderedNew[newIndex];
+            int resultStart = results.Count;
+            results.Add(BuildResult(
+                ModelCompareChangeType.Added,
+                ModelCompareObjectType.Area,
+                DescribeArea(newArea),
+                "",
+                newArea.AreaName,
+                ModelCompareChangeImportance.High,
+                diagnostics: BuildUnmatchedDiagnostics("No area with a matching ID or stable geometry was found in the old snapshot."),
+                searchText: BuildAreaSearchText(null, newArea)));
+            ApplyAreaNavigationContext(results, resultStart, null, newArea);
+        }
+    }
+
+    private static void MatchAreaPair(
+        ModelCompareAreaObjectSnapshot oldArea,
+        ModelCompareAreaObjectSnapshot newArea,
+        ModelCompareToleranceSettings settings,
+        bool comparePropertyDetails,
+        List<ModelCompareResultRow> results,
+        ModelCompareMatchMethod matchMethod,
+        string reason)
+    {
+        int resultStart = results.Count;
+        CompareMatchedArea(oldArea, newArea, settings, comparePropertyDetails, results);
+        ApplyDiagnostics(results, resultStart, new ComparisonDiagnostics(
+            matchMethod,
+            ModelCompareConfidenceLevel.High,
+            1.0,
+            reason,
+            null,
+            null,
+            null,
+            null));
+        ApplySearchContext(results, resultStart, BuildAreaSearchText(oldArea, newArea));
+        ApplyAreaNavigationContext(results, resultStart, oldArea, newArea);
+    }
+
+    private static void DetectAreaRepartitions(
+        IReadOnlyList<ModelCompareAreaObjectSnapshot> orderedOld,
+        IReadOnlyList<ModelCompareAreaObjectSnapshot> orderedNew,
+        HashSet<int> matchedOld,
+        HashSet<int> matchedNew,
+        ModelCompareToleranceSettings settings,
+        bool comparePropertyDetails,
+        List<ModelCompareResultRow> results)
+    {
+        List<int> oldIndexes = Enumerable.Range(0, orderedOld.Count).Where(i => !matchedOld.Contains(i)).ToList();
+        List<int> newIndexes = Enumerable.Range(0, orderedNew.Count).Where(i => !matchedNew.Contains(i)).ToList();
+        if (oldIndexes.Count == 0 || newIndexes.Count == 0)
+            return;
+
+        Dictionary<string, List<int>> oldByPlane = GroupAreasByPlane(orderedOld, oldIndexes, settings.CoordinateTolerance);
+        Dictionary<string, List<int>> newByPlane = GroupAreasByPlane(orderedNew, newIndexes, settings.CoordinateTolerance);
+
+        foreach (string plane in oldByPlane.Keys.Where(newByPlane.ContainsKey).ToList())
+        {
+            List<int> planeOld = oldByPlane[plane];
+            List<int> planeNew = newByPlane[plane];
+
+            // Bipartite overlap graph: an old and new area are connected if either centroid lies inside the other.
+            var oldAdjacency = new List<List<int>>();
+            var newAdjacency = new List<List<int>>();
+            for (int b = 0; b < planeNew.Count; b++)
+                newAdjacency.Add([]);
+            for (int a = 0; a < planeOld.Count; a++)
             {
-                ModelCompareAreaObjectSnapshot newArea = newQueue!.Dequeue();
-                int resultStart = results.Count;
-                results.Add(BuildResult(
-                    ModelCompareChangeType.Added,
-                    ModelCompareObjectType.Area,
-                    DescribeArea(newArea),
-                    "",
-                    newArea.AreaName,
-                    ModelCompareChangeImportance.High,
-                    diagnostics: BuildUnmatchedDiagnostics("No area with the same stable corner geometry was found in the old snapshot."),
-                    searchText: BuildAreaSearchText(null, newArea)));
-                ApplyAreaNavigationContext(results, resultStart, null, newArea);
+                var adjacent = new List<int>();
+                for (int b = 0; b < planeNew.Count; b++)
+                {
+                    if (AreasOverlap(orderedOld[planeOld[a]], orderedNew[planeNew[b]]))
+                    {
+                        adjacent.Add(b);
+                        newAdjacency[b].Add(a);
+                    }
+                }
+
+                oldAdjacency.Add(adjacent);
+            }
+
+            var oldVisited = new bool[planeOld.Count];
+            var newVisited = new bool[planeNew.Count];
+            for (int a = 0; a < planeOld.Count; a++)
+            {
+                if (oldVisited[a] || oldAdjacency[a].Count == 0)
+                    continue;
+
+                var componentOld = new List<int>();
+                var componentNew = new List<int>();
+                var oldQueue = new Queue<int>();
+                var newQueue = new Queue<int>();
+                oldVisited[a] = true;
+                oldQueue.Enqueue(a);
+                while (oldQueue.Count > 0 || newQueue.Count > 0)
+                {
+                    while (oldQueue.Count > 0)
+                    {
+                        int x = oldQueue.Dequeue();
+                        componentOld.Add(x);
+                        foreach (int y in oldAdjacency[x])
+                        {
+                            if (!newVisited[y])
+                            {
+                                newVisited[y] = true;
+                                newQueue.Enqueue(y);
+                            }
+                        }
+                    }
+
+                    while (newQueue.Count > 0)
+                    {
+                        int y = newQueue.Dequeue();
+                        componentNew.Add(y);
+                        foreach (int x in newAdjacency[y])
+                        {
+                            if (!oldVisited[x])
+                            {
+                                oldVisited[x] = true;
+                                oldQueue.Enqueue(x);
+                            }
+                        }
+                    }
+                }
+
+                if (componentOld.Count == 0 || componentNew.Count == 0)
+                    continue;
+
+                List<ModelCompareAreaObjectSnapshot> oldAreas = componentOld.Select(i => orderedOld[planeOld[i]]).ToList();
+                List<ModelCompareAreaObjectSnapshot> newAreas = componentNew.Select(i => orderedNew[planeNew[i]]).ToList();
+
+                // Only accept when the two sides cover essentially the same footprint area.
+                double oldFootprint = oldAreas.Sum(AreaPlanarArea);
+                double newFootprint = newAreas.Sum(AreaPlanarArea);
+                double areaTolerance = Math.Max(Math.Max(oldFootprint, newFootprint) * 0.02, settings.CoordinateTolerance);
+                if (Math.Abs(oldFootprint - newFootprint) > areaTolerance)
+                    continue;
+
+                foreach (int i in componentOld)
+                    matchedOld.Add(planeOld[i]);
+                foreach (int j in componentNew)
+                    matchedNew.Add(planeNew[j]);
+
+                if (componentOld.Count == 1 && componentNew.Count == 1)
+                {
+                    // Same footprint, different corner geometry: a reshaped slab. Reuse the matched-area diff.
+                    MatchAreaPair(oldAreas[0], newAreas[0], settings, comparePropertyDetails, results,
+                        ModelCompareMatchMethod.ExactAreaGeometry, "Same footprint on the same plane (reshaped).");
+                }
+                else
+                {
+                    EmitAreaRepartition(oldAreas, newAreas, results);
+                }
             }
         }
+    }
+
+    private static void EmitAreaRepartition(
+        IReadOnlyList<ModelCompareAreaObjectSnapshot> oldAreas,
+        IReadOnlyList<ModelCompareAreaObjectSnapshot> newAreas,
+        List<ModelCompareResultRow> results)
+    {
+        ModelCompareAreaObjectSnapshot? referenceNew = newAreas.Count > 0 ? newAreas[0] : null;
+        ModelCompareAreaObjectSnapshot? referenceOld = oldAreas.Count > 0 ? oldAreas[0] : null;
+        string story = ((referenceNew ?? referenceOld)?.Story ?? "").Trim();
+        string description = story.Length > 0
+            ? $"Slab region at {story} / re-partitioned"
+            : "Slab region / re-partitioned";
+
+        int resultStart = results.Count;
+        results.Add(BuildResult(
+            ModelCompareChangeType.Modified,
+            ModelCompareObjectType.Area,
+            description,
+            DescribeAreaSet(oldAreas),
+            DescribeAreaSet(newAreas),
+            ModelCompareChangeImportance.High));
+        ApplyDiagnostics(results, resultStart, new ComparisonDiagnostics(
+            ModelCompareMatchMethod.ExactAreaGeometry,
+            ModelCompareConfidenceLevel.High,
+            1.0,
+            "The same footprint is covered by a different number of areas (split/merge).",
+            null,
+            null,
+            null,
+            null));
+        ApplyAreaNavigationContext(results, resultStart, referenceOld, referenceNew);
+        ApplySearchContext(results, resultStart, BuildAreaSearchText(referenceOld, referenceNew));
+    }
+
+    private static string DescribeAreaSet(IReadOnlyList<ModelCompareAreaObjectSnapshot> areas)
+    {
+        string count = areas.Count == 1 ? "1 area" : $"{areas.Count} areas";
+        List<string> properties = areas
+            .Select(area => (area.PropertyName ?? "").Trim())
+            .Where(property => property.Length > 0)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        string property = properties.Count == 1 ? properties[0] : properties.Count == 0 ? "?" : "mixed";
+        List<double> thicknesses = areas.Select(area => area.Thickness).Distinct().ToList();
+        string thickness = thicknesses.Count == 1 ? FormatNumber(thicknesses[0]) : "mixed";
+        return $"{count} ({property}, t={thickness})";
+    }
+
+    private static Dictionary<string, List<int>> GroupAreasByPlane(
+        IReadOnlyList<ModelCompareAreaObjectSnapshot> areas,
+        IEnumerable<int> indexes,
+        double tolerance)
+    {
+        var groups = new Dictionary<string, List<int>>(StringComparer.Ordinal);
+        foreach (int index in indexes)
+        {
+            string key = AreaPlaneKey(areas[index], tolerance);
+            if (key.Length == 0)
+                continue;
+
+            if (!groups.TryGetValue(key, out List<int>? list))
+            {
+                list = [];
+                groups[key] = list;
+            }
+
+            list.Add(index);
+        }
+
+        return groups;
+    }
+
+    private static bool AreasOverlap(ModelCompareAreaObjectSnapshot a, ModelCompareAreaObjectSnapshot b)
+    {
+        return CentroidInsideArea(a, AreaCentroid(b.Corners)) || CentroidInsideArea(b, AreaCentroid(a.Corners));
+    }
+
+    private static (double X, double Y, double Z) AreaNormal(IReadOnlyList<ModelComparePointSnapshot> corners)
+    {
+        double nx = 0, ny = 0, nz = 0;
+        for (int i = 0; i < corners.Count; i++)
+        {
+            ModelComparePointSnapshot p = corners[i];
+            ModelComparePointSnapshot q = corners[(i + 1) % corners.Count];
+            nx += (p.Y - q.Y) * (p.Z + q.Z);
+            ny += (p.Z - q.Z) * (p.X + q.X);
+            nz += (p.X - q.X) * (p.Y + q.Y);
+        }
+
+        return (nx, ny, nz);
+    }
+
+    private static double AreaPlanarArea(ModelCompareAreaObjectSnapshot area)
+    {
+        (double X, double Y, double Z) normal = AreaNormal(area.Corners);
+        return 0.5 * Math.Sqrt(normal.X * normal.X + normal.Y * normal.Y + normal.Z * normal.Z);
+    }
+
+    private static (double X, double Y, double Z) AreaCentroid(IReadOnlyList<ModelComparePointSnapshot> corners)
+    {
+        double x = 0, y = 0, z = 0;
+        foreach (ModelComparePointSnapshot corner in corners)
+        {
+            x += corner.X;
+            y += corner.Y;
+            z += corner.Z;
+        }
+
+        int count = Math.Max(1, corners.Count);
+        return (x / count, y / count, z / count);
+    }
+
+    private static string AreaPlaneKey(ModelCompareAreaObjectSnapshot area, double tolerance)
+    {
+        if (area.Corners.Count < 3)
+            return "";
+
+        (double X, double Y, double Z) normal = Normalize(AreaNormal(area.Corners));
+        if (normal.X == 0 && normal.Y == 0 && normal.Z == 0)
+            return "";
+
+        // Canonicalise the sign so the two windings of one plane produce the same key.
+        double ax = Math.Abs(normal.X), ay = Math.Abs(normal.Y), az = Math.Abs(normal.Z);
+        double dominant = ax >= ay && ax >= az ? normal.X : ay >= az ? normal.Y : normal.Z;
+        if (dominant < 0)
+            normal = (-normal.X, -normal.Y, -normal.Z);
+
+        (double X, double Y, double Z) centroid = AreaCentroid(area.Corners);
+        double offset = normal.X * centroid.X + normal.Y * centroid.Y + normal.Z * centroid.Z;
+        return $"{Quantize(normal.X, 0.001)},{Quantize(normal.Y, 0.001)},{Quantize(normal.Z, 0.001)}|{Quantize(offset, tolerance)}";
+    }
+
+    private static bool CentroidInsideArea(ModelCompareAreaObjectSnapshot polygon, (double X, double Y, double Z) point)
+    {
+        IReadOnlyList<ModelComparePointSnapshot> corners = polygon.Corners;
+        if (corners.Count < 3)
+            return false;
+
+        (double X, double Y, double Z) normal = Normalize(AreaNormal(corners));
+        if (normal.X == 0 && normal.Y == 0 && normal.Z == 0)
+            return false;
+
+        // Build an in-plane 2D basis and project the polygon and the test point into it.
+        (double X, double Y, double Z) seed = Math.Abs(normal.X) <= Math.Abs(normal.Y) && Math.Abs(normal.X) <= Math.Abs(normal.Z)
+            ? (1, 0, 0)
+            : Math.Abs(normal.Y) <= Math.Abs(normal.Z) ? (0, 1, 0) : (0, 0, 1);
+        (double X, double Y, double Z) u = Normalize(Cross(normal, seed));
+        (double X, double Y, double Z) v = Cross(normal, u);
+        (double X, double Y, double Z) origin = (corners[0].X, corners[0].Y, corners[0].Z);
+
+        var polygon2D = new List<(double X, double Y)>(corners.Count);
+        foreach (ModelComparePointSnapshot corner in corners)
+            polygon2D.Add(ProjectToPlane((corner.X, corner.Y, corner.Z), origin, u, v));
+        (double X, double Y) test = ProjectToPlane(point, origin, u, v);
+
+        bool inside = false;
+        for (int i = 0, j = polygon2D.Count - 1; i < polygon2D.Count; j = i++)
+        {
+            (double X, double Y) pi = polygon2D[i];
+            (double X, double Y) pj = polygon2D[j];
+            if (pi.Y > test.Y != pj.Y > test.Y &&
+                test.X < (pj.X - pi.X) * (test.Y - pi.Y) / (pj.Y - pi.Y) + pi.X)
+            {
+                inside = !inside;
+            }
+        }
+
+        return inside;
+    }
+
+    private static (double X, double Y) ProjectToPlane(
+        (double X, double Y, double Z) point,
+        (double X, double Y, double Z) origin,
+        (double X, double Y, double Z) u,
+        (double X, double Y, double Z) v)
+    {
+        (double X, double Y, double Z) d = (point.X - origin.X, point.Y - origin.Y, point.Z - origin.Z);
+        return (d.X * u.X + d.Y * u.Y + d.Z * u.Z, d.X * v.X + d.Y * v.Y + d.Z * v.Z);
+    }
+
+    private static (double X, double Y, double Z) Normalize((double X, double Y, double Z) vector)
+    {
+        double length = Math.Sqrt(vector.X * vector.X + vector.Y * vector.Y + vector.Z * vector.Z);
+        return length <= 1e-12 ? (0, 0, 0) : (vector.X / length, vector.Y / length, vector.Z / length);
+    }
+
+    private static (double X, double Y, double Z) Cross((double X, double Y, double Z) a, (double X, double Y, double Z) b)
+    {
+        return (a.Y * b.Z - a.Z * b.Y, a.Z * b.X - a.X * b.Z, a.X * b.Y - a.Y * b.X);
     }
 
     private static void CompareMatchedArea(
@@ -455,6 +801,15 @@ public sealed class ModelCompareService
         List<ModelCompareResultRow> results)
     {
         string description = $"{DescribeArea(newArea)} matched to {oldArea.AreaName}";
+
+        AddStringDifference(
+            results,
+            ModelCompareObjectType.Area,
+            $"{description} / opening",
+            oldArea.IsOpening ? "Opening" : "Slab/panel",
+            newArea.IsOpening ? "Opening" : "Slab/panel",
+            ModelCompareChangeImportance.High);
+
         bool propertyChanged = !string.Equals(
             (oldArea.PropertyName ?? "").Trim(),
             (newArea.PropertyName ?? "").Trim(),
@@ -992,28 +1347,6 @@ public sealed class ModelCompareService
         return lookup;
     }
 
-    private static Dictionary<string, Queue<int>> BuildFrameNameLookup(IReadOnlyList<ModelCompareFrameSnapshot> frames)
-    {
-        var lookup = new Dictionary<string, Queue<int>>(StringComparer.OrdinalIgnoreCase);
-
-        for (int index = 0; index < frames.Count; index++)
-        {
-            string frameName = (frames[index].FrameName ?? "").Trim();
-            if (frameName.Length == 0)
-                continue;
-
-            if (!lookup.TryGetValue(frameName, out Queue<int>? indexes))
-            {
-                indexes = new Queue<int>();
-                lookup[frameName] = indexes;
-            }
-
-            indexes.Enqueue(index);
-        }
-
-        return lookup;
-    }
-
     private static void AddFrameEndpointIndex(
         Dictionary<FramePointBucket, List<int>> lookup,
         FramePointBucket bucket,
@@ -1078,38 +1411,80 @@ public sealed class ModelCompareService
         return (long)Math.Floor(value / tolerance);
     }
 
-    private static Dictionary<string, Queue<ModelCompareAreaObjectSnapshot>> BuildAreaLookup(
-        IEnumerable<ModelCompareAreaObjectSnapshot> areas,
-        double coordinateTolerance)
+    private static string BuildNormalizedAreaKey(ModelCompareAreaObjectSnapshot area, double tolerance)
     {
-        var lookup = new Dictionary<string, Queue<ModelCompareAreaObjectSnapshot>>(StringComparer.Ordinal);
-
-        foreach (ModelCompareAreaObjectSnapshot area in areas.OrderBy(area => area.AreaName, StringComparer.OrdinalIgnoreCase))
-        {
-            string key = BuildAreaGeometryKey(area, coordinateTolerance);
-            if (key.Length == 0)
-                continue;
-
-            if (!lookup.TryGetValue(key, out Queue<ModelCompareAreaObjectSnapshot>? queue))
-            {
-                queue = new Queue<ModelCompareAreaObjectSnapshot>();
-                lookup[key] = queue;
-            }
-
-            queue.Enqueue(area);
-        }
-
-        return lookup;
-    }
-
-    private static string BuildAreaGeometryKey(ModelCompareAreaObjectSnapshot area, double tolerance)
-    {
-        if (area.Corners.Count < 3)
+        List<(double X, double Y, double Z)> vertices = NormalizeAreaVertices(area.Corners, tolerance);
+        if (vertices.Count < 3)
             return "";
 
-        return string.Join("|", area.Corners
-            .Select(point => BuildPointCoordinateKey(point.X, point.Y, point.Z, tolerance))
+        return string.Join("|", vertices
+            .Select(vertex => BuildPointCoordinateKey(vertex.X, vertex.Y, vertex.Z, tolerance))
             .OrderBy(key => key, StringComparer.Ordinal));
+    }
+
+    // Reduces a raw corner list to the polygon's essential vertices: rounds to the tolerance grid, drops
+    // duplicate points, and drops collinear points (e.g. an edge node inserted where a beam crosses the slab
+    // edge) so the same footprint keys identically regardless of how it was drawn or meshed.
+    private static List<(double X, double Y, double Z)> NormalizeAreaVertices(
+        IReadOnlyList<ModelComparePointSnapshot> corners,
+        double tolerance)
+    {
+        var deduped = new List<(double X, double Y, double Z)>();
+        foreach (ModelComparePointSnapshot corner in corners)
+        {
+            (double X, double Y, double Z) point = (corner.X, corner.Y, corner.Z);
+            if (deduped.Count == 0 || PointDistance(deduped[^1], point) > tolerance)
+                deduped.Add(point);
+        }
+
+        if (deduped.Count > 1 && PointDistance(deduped[0], deduped[^1]) <= tolerance)
+            deduped.RemoveAt(deduped.Count - 1);
+        if (deduped.Count < 3)
+            return deduped;
+
+        var essential = new List<(double X, double Y, double Z)>();
+        int count = deduped.Count;
+        for (int index = 0; index < count; index++)
+        {
+            (double X, double Y, double Z) previous = deduped[(index - 1 + count) % count];
+            (double X, double Y, double Z) current = deduped[index];
+            (double X, double Y, double Z) next = deduped[(index + 1) % count];
+            if (!IsCollinear(previous, current, next, tolerance))
+                essential.Add(current);
+        }
+
+        return essential.Count >= 3 ? essential : deduped;
+    }
+
+    private static bool IsCollinear(
+        (double X, double Y, double Z) a,
+        (double X, double Y, double Z) b,
+        (double X, double Y, double Z) c,
+        double tolerance)
+    {
+        (double X, double Y, double Z) ab = (b.X - a.X, b.Y - a.Y, b.Z - a.Z);
+        (double X, double Y, double Z) ac = (c.X - a.X, c.Y - a.Y, c.Z - a.Z);
+        (double X, double Y, double Z) cross =
+        (
+            ab.Y * ac.Z - ab.Z * ac.Y,
+            ab.Z * ac.X - ab.X * ac.Z,
+            ab.X * ac.Y - ab.Y * ac.X
+        );
+        double crossMagnitude = Math.Sqrt(cross.X * cross.X + cross.Y * cross.Y + cross.Z * cross.Z);
+        double baseLength = Math.Sqrt(ac.X * ac.X + ac.Y * ac.Y + ac.Z * ac.Z);
+        if (baseLength <= tolerance)
+            return true;
+
+        // Perpendicular distance of b from the line a-c.
+        return crossMagnitude / baseLength <= tolerance;
+    }
+
+    private static double PointDistance((double X, double Y, double Z) a, (double X, double Y, double Z) b)
+    {
+        double dx = a.X - b.X;
+        double dy = a.Y - b.Y;
+        double dz = a.Z - b.Z;
+        return Math.Sqrt(dx * dx + dy * dy + dz * dz);
     }
 
     private static string BuildPointCoordinateKey(double x, double y, double z, double tolerance)
@@ -1248,6 +1623,10 @@ public sealed class ModelCompareService
         string newName = (newFrame?.FrameName ?? "").Trim();
         string oldLocation = oldFrame == null ? "" : FormatFrameLocation(oldFrame);
         string newLocation = newFrame == null ? "" : FormatFrameLocation(newFrame);
+        string oldLabel = (oldFrame?.Label ?? "").Trim();
+        string newLabel = (newFrame?.Label ?? "").Trim();
+        string oldUid = (oldFrame?.Uid ?? "").Trim();
+        string newUid = (newFrame?.Uid ?? "").Trim();
         ModelCompareFrameSnapshot? referenceFrame = newFrame ?? oldFrame;
         ModelCompareMemberType memberType = referenceFrame == null
             ? ModelCompareMemberType.Other
@@ -1260,6 +1639,10 @@ public sealed class ModelCompareService
             results[index].NewEtabsObjectName = newName;
             results[index].OldObjectLocation = oldLocation;
             results[index].NewObjectLocation = newLocation;
+            results[index].OldLabel = oldLabel;
+            results[index].NewLabel = newLabel;
+            results[index].OldUid = oldUid;
+            results[index].NewUid = newUid;
             results[index].MemberType = memberType;
             results[index].Story = story;
         }
@@ -1295,6 +1678,10 @@ public sealed class ModelCompareService
         string newName = (newArea?.AreaName ?? "").Trim();
         string oldLocation = oldArea == null ? "" : FormatAreaLocation(oldArea);
         string newLocation = newArea == null ? "" : FormatAreaLocation(newArea);
+        string oldLabel = (oldArea?.Label ?? "").Trim();
+        string newLabel = (newArea?.Label ?? "").Trim();
+        string oldUid = (oldArea?.Uid ?? "").Trim();
+        string newUid = (newArea?.Uid ?? "").Trim();
         string story = ((newArea ?? oldArea)?.Story ?? "").Trim();
 
         for (int index = startIndex; index < results.Count; index++)
@@ -1303,6 +1690,10 @@ public sealed class ModelCompareService
             results[index].NewEtabsObjectName = newName;
             results[index].OldObjectLocation = oldLocation;
             results[index].NewObjectLocation = newLocation;
+            results[index].OldLabel = oldLabel;
+            results[index].NewLabel = newLabel;
+            results[index].OldUid = oldUid;
+            results[index].NewUid = newUid;
             results[index].MemberType = ModelCompareMemberType.Area;
             results[index].Story = story;
         }

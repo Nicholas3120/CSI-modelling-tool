@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Globalization;
 using CSIModellingTools.Models;
 
 namespace CSIModellingTools.ViewModels;
@@ -34,6 +35,15 @@ public sealed class ModelCompareObjectResultViewModel : INotifyPropertyChanged
             ? ModelCompareConfidenceLevel.High
             : rows.Min(row => row.ConfidenceLevel);
         ChangeSummary = BuildChangeSummary(rows);
+
+        ModelCompareResultRowViewModel? reference = rows.Count > 0 ? rows[0] : null;
+        string newLabel = (reference?.NewLabel ?? "").Trim();
+        string oldLabel = (reference?.OldLabel ?? "").Trim();
+        DisplayName = !string.IsNullOrWhiteSpace(newLabel) ? newLabel
+            : !string.IsNullOrWhiteSpace(oldLabel) ? oldLabel
+            : ObjectName;
+        TraceText = BuildTraceText(reference);
+
         SearchText = BuildSearchText();
     }
 
@@ -50,6 +60,8 @@ public sealed class ModelCompareObjectResultViewModel : INotifyPropertyChanged
     public ModelCompareConfidenceLevel ConfidenceLevel { get; }
     public string ChangeSummary { get; }
     public string SearchText { get; }
+    public string DisplayName { get; }
+    public string TraceText { get; }
 
     public bool IsSelectableInEtabs => ObjectType is ModelCompareObjectType.Frame or ModelCompareObjectType.Area or ModelCompareObjectType.Joint;
 
@@ -126,7 +138,7 @@ public sealed class ModelCompareObjectResultViewModel : INotifyPropertyChanged
                 ModelCompareChangeType.Added => "Added",
                 ModelCompareChangeType.Removed => "Removed",
                 ModelCompareChangeType.Moved => row.MovementDistance.HasValue
-                    ? $"Moved {row.MovementDistance.Value:0.###} m"
+                    ? $"Moved {row.MovementDistance.Value.ToString("0.###", CultureInfo.InvariantCulture)} m"
                     : "Moved",
                 _ => $"{DescribeField(row.ObjectDescription)}: {Blank(row.OldValue)} → {Blank(row.NewValue)}"
             };
@@ -150,6 +162,47 @@ public sealed class ModelCompareObjectResultViewModel : INotifyPropertyChanged
     }
 
     private static string Blank(string value) => string.IsNullOrWhiteSpace(value) ? "(none)" : value;
+
+    private static string BuildTraceText(ModelCompareResultRowViewModel? reference)
+    {
+        if (reference == null)
+            return "";
+
+        var lines = new List<string>();
+        string names = FormatOldNew(reference.OldEtabsObjectName, reference.NewEtabsObjectName);
+        if (names.Length > 0)
+            lines.Add($"ETABS name: {names}");
+
+        string ids = FormatOldNew(ShortId(reference.OldUid), ShortId(reference.NewUid));
+        if (ids.Length > 0)
+            lines.Add($"Tracking ID: {ids}");
+
+        if (!string.IsNullOrWhiteSpace(reference.NewObjectLocation))
+            lines.Add($"Location: {reference.NewObjectLocation}");
+        else if (!string.IsNullOrWhiteSpace(reference.OldObjectLocation))
+            lines.Add($"Location: {reference.OldObjectLocation}");
+
+        return string.Join("\n", lines);
+    }
+
+    private static string FormatOldNew(string oldValue, string newValue)
+    {
+        string left = (oldValue ?? "").Trim();
+        string right = (newValue ?? "").Trim();
+        if (left.Length == 0 && right.Length == 0)
+            return "";
+        if (left.Length == 0)
+            return right;
+        if (right.Length == 0)
+            return left;
+        return string.Equals(left, right, StringComparison.OrdinalIgnoreCase) ? left : $"{left} → {right}";
+    }
+
+    private static string ShortId(string? uid)
+    {
+        string value = (uid ?? "").Trim();
+        return value.Length > 8 ? value[..8] : value;
+    }
 
     private string BuildSearchText()
     {

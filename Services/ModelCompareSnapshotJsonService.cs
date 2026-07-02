@@ -217,6 +217,7 @@ public sealed class ModelCompareSnapshotJsonService
             {
                 area.Corners ??= [];
                 area.GroupNames ??= [];
+                area.Uid ??= "";
             }
         }
 

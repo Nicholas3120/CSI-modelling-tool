@@ -105,6 +105,9 @@ internal sealed class EtabsSnapshotExtractor
         if (areaNamesRead && areas.Count != areaNames.Count)
             areaWarnings.Add($"Area extraction was marked failed because {areaNames.Count - areas.Count} of {areaNames.Count} listed ETABS areas had unreadable geometry.");
 
+        // Persistent tracking IDs for areas (stamped in place only when the model is already unlocked).
+        PopulateAreaIds(_sapModel, areas, modelUnlocked, areaWarnings);
+
         var materialWarnings = new List<string>();
         bool materialNamesRead = TryGetMaterialNamesForSnapshot(_sapModel, materialWarnings, out List<string> materialNames);
         List<ModelCompareMaterialSnapshot> materials = materialNamesRead
@@ -1010,6 +1013,16 @@ internal sealed class EtabsSnapshotExtractor
             return null;
         }
 
+        bool isOpening = false;
+        try
+        {
+            sapModel.AreaObj.GetOpening(areaName, ref isOpening);
+        }
+        catch
+        {
+            // Opening flag is optional; a non-opening default is safe.
+        }
+
         areaPropertyByName.TryGetValue(propertyName, out ModelCompareAreaPropertySnapshot? areaProperty);
 
         return new ModelCompareAreaObjectSnapshot
@@ -1020,11 +1033,61 @@ internal sealed class EtabsSnapshotExtractor
             PropertyName = propertyName,
             MaterialName = areaProperty?.MaterialName ?? "",
             Thickness = areaProperty?.Thickness ?? 0,
+            IsOpening = isOpening,
             Corners = corners,
             GroupNames = groupsByAreaName.TryGetValue(areaName, out List<string>? groupNames)
                 ? groupNames.ToList()
                 : []
         };
+    }
+
+    private static void PopulateAreaIds(
+        ETABSv1.cSapModel sapModel,
+        IReadOnlyList<ModelCompareAreaObjectSnapshot> areas,
+        bool assignMissingIds,
+        List<string> warnings)
+    {
+        int assignedIdCount = 0;
+        int missingIdCount = 0;
+        foreach (ModelCompareAreaObjectSnapshot area in areas)
+        {
+            try
+            {
+                string guid = "";
+                int guidRet = sapModel.AreaObj.GetGUID(area.AreaName, ref guid);
+                if (guidRet == 0 && !string.IsNullOrWhiteSpace(guid))
+                {
+                    area.Uid = guid.Trim();
+                }
+                else if (assignMissingIds)
+                {
+                    string newGuid = ModelCompareMemberId.Prefix + Guid.NewGuid().ToString("N");
+                    int setRet = sapModel.AreaObj.SetGUID(area.AreaName, newGuid);
+                    if (setRet == 0)
+                    {
+                        area.Uid = newGuid;
+                        assignedIdCount++;
+                    }
+                    else
+                    {
+                        missingIdCount++;
+                    }
+                }
+                else
+                {
+                    missingIdCount++;
+                }
+            }
+            catch
+            {
+                missingIdCount++;
+            }
+        }
+
+        if (assignedIdCount > 0)
+            warnings.Add($"Assigned tracking IDs to {assignedIdCount} previously untracked area(s). Save the ETABS model so these IDs persist for future comparisons.");
+        if (missingIdCount > 0)
+            warnings.Add($"{missingIdCount} area(s) have no tracking ID (the model is locked or the ID write failed), so they are matched by geometry. Unlock the model and re-snapshot, or use Assign Member IDs, then save, to enable ID tracking.");
     }
 
     private static List<ModelComparePointSnapshot> ReadModelCompareAreaCorners(

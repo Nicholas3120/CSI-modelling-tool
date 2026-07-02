@@ -4321,12 +4321,12 @@
                                     <DataGridTextColumn Header="Type" Binding="{Binding ObjectTypeText}" Width="105" MinWidth="90" IsReadOnly="True"/>
                                     <DataGridTextColumn Header="Member" Binding="{Binding MemberTypeText}" Width="90" MinWidth="80" IsReadOnly="True"/>
                                     <DataGridTextColumn Header="Story" Binding="{Binding Story}" Width="95" MinWidth="80" IsReadOnly="True"/>
-                                    <DataGridTextColumn Header="Object" Binding="{Binding ObjectName}" Width="180" MinWidth="120" IsReadOnly="True"/>
                                     <DataGridTextColumn Header="What changed" Binding="{Binding ChangeSummary}" Width="*" MinWidth="240" IsReadOnly="True">
                                         <DataGridTextColumn.ElementStyle>
                                             <Style TargetType="TextBlock">
                                                 <Setter Property="TextWrapping" Value="Wrap"/>
                                                 <Setter Property="VerticalAlignment" Value="Center"/>
+                                                <Setter Property="ToolTip" Value="{Binding TraceText}"/>
                                             </Style>
                                         </DataGridTextColumn.ElementStyle>
                                     </DataGridTextColumn>

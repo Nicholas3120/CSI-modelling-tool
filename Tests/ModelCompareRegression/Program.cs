@@ -40,7 +40,14 @@ internal static class Program
             ("Frame end release change detected", FrameEndReleaseChangeDetected),
             ("Persistent ID matches relocated frame", PersistentIdMatchesRelocatedFrame),
             ("Persistent ID beats geometry ambiguity", PersistentIdSurvivesRename),
-            ("Frames without IDs still use geometry", FramesWithoutIdsUseGeometry)
+            ("Frames without IDs still use geometry", FramesWithoutIdsUseGeometry),
+            ("Different IDs block reused-name match", DifferentIdsBlockReusedNameMatch),
+            ("Slab split reported as re-partition", SlabSplitDetected),
+            ("Slab merge reported as re-partition", SlabMergeDetected),
+            ("Slab ID matches reshaped area", SlabIdMatchesReshapedArea),
+            ("Slab edge node insertion is ignored", SlabEdgeNodeInsertionIgnored),
+            ("Slab redraw at same footprint matches", SlabRedrawSameFootprintMatches),
+            ("Slab opening flag change detected", SlabOpeningFlagChangeDetected)
         ];
 
         int failed = 0;
@@ -427,6 +434,145 @@ internal static class Program
         ModelCompareResultRow row = Single(Compare(oldSnapshot, newSnapshot).Differences,
             item => item.ObjectType == ModelCompareObjectType.Frame && item.ObjectDescription.Contains("/ section", StringComparison.OrdinalIgnoreCase));
         Equal(ModelCompareMatchMethod.ExactCoordinates, row.MatchMethod, "Without member IDs, delete+redraw at the same position should still match by coordinates.");
+    }
+
+    private static void SlabSplitDetected()
+    {
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        oldSnapshot.Areas = [MakeArea("OLD1", "AP1", 0.2, (0, 0, 0), (4, 0, 0), (4, 4, 0), (0, 4, 0))];
+        newSnapshot.Areas =
+        [
+            MakeArea("NEW1", "AP2", 0.25, (0, 0, 0), (2, 0, 0), (2, 4, 0), (0, 4, 0)),
+            MakeArea("NEW2", "AP2", 0.25, (2, 0, 0), (4, 0, 0), (4, 4, 0), (2, 4, 0))
+        ];
+
+        List<ModelCompareResultRow> areaRows = Compare(oldSnapshot, newSnapshot).Differences
+            .Where(row => row.ObjectType == ModelCompareObjectType.Area).ToList();
+        False(areaRows.Any(row => row.ChangeType is ModelCompareChangeType.Added or ModelCompareChangeType.Removed),
+            "A split slab must not be reported as separate added/removed areas.");
+        ModelCompareResultRow repartition = Single(areaRows,
+            row => row.ObjectDescription.Contains("re-partitioned", StringComparison.OrdinalIgnoreCase));
+        True(repartition.OldValue.Contains("1 area", StringComparison.OrdinalIgnoreCase), "Old side should be one area.");
+        True(repartition.NewValue.Contains("2 areas", StringComparison.OrdinalIgnoreCase), "New side should be two areas.");
+    }
+
+    private static void SlabMergeDetected()
+    {
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        oldSnapshot.Areas =
+        [
+            MakeArea("OLD1", "AP1", 0.2, (0, 0, 0), (2, 0, 0), (2, 4, 0), (0, 4, 0)),
+            MakeArea("OLD2", "AP1", 0.2, (2, 0, 0), (4, 0, 0), (4, 4, 0), (2, 4, 0))
+        ];
+        newSnapshot.Areas = [MakeArea("NEW1", "AP2", 0.25, (0, 0, 0), (4, 0, 0), (4, 4, 0), (0, 4, 0))];
+
+        List<ModelCompareResultRow> areaRows = Compare(oldSnapshot, newSnapshot).Differences
+            .Where(row => row.ObjectType == ModelCompareObjectType.Area).ToList();
+        False(areaRows.Any(row => row.ChangeType is ModelCompareChangeType.Added or ModelCompareChangeType.Removed),
+            "A merged slab must not be reported as separate added/removed areas.");
+        ModelCompareResultRow repartition = Single(areaRows,
+            row => row.ObjectDescription.Contains("re-partitioned", StringComparison.OrdinalIgnoreCase));
+        True(repartition.OldValue.Contains("2 areas", StringComparison.OrdinalIgnoreCase), "Old side should be two areas.");
+        True(repartition.NewValue.Contains("1 area", StringComparison.OrdinalIgnoreCase), "New side should be one area.");
+    }
+
+    private static ModelCompareAreaObjectSnapshot MakeArea(string name, string property, double thickness, params (double X, double Y, double Z)[] corners)
+    {
+        return new ModelCompareAreaObjectSnapshot
+        {
+            AreaName = name,
+            Label = name,
+            Story = "Story1",
+            PropertyName = property,
+            MaterialName = "Concrete",
+            Thickness = thickness,
+            Corners = corners.Select(c => new ModelComparePointSnapshot { X = c.X, Y = c.Y, Z = c.Z }).ToList()
+        };
+    }
+
+    private static void DifferentIdsBlockReusedNameMatch()
+    {
+        // ETABS reuses names like "10" for unrelated members after a Save-As + edits. Two frames that share
+        // that name but carry different tracking IDs and sit far apart must be reported as added/removed,
+        // never matched as a large bogus "move".
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        oldSnapshot.Frames[0].FrameName = "10";
+        oldSnapshot.Frames[0].Uid = "MCT-old";
+        ModelCompareFrameSnapshot newFrame = newSnapshot.Frames[0];
+        newFrame.FrameName = "10";
+        newFrame.Uid = "MCT-new";
+        newFrame.IX = 50;
+        newFrame.JX = 50;
+
+        ModelCompareComparisonResult result = Compare(oldSnapshot, newSnapshot);
+        False(result.Differences.Any(row => row.ObjectType == ModelCompareObjectType.Frame && row.ChangeType == ModelCompareChangeType.Moved),
+            "Frames with different tracking IDs must not be matched as moved via a shared reused name.");
+        True(result.Differences.Any(row => row.ObjectType == ModelCompareObjectType.Frame && row.ChangeType == ModelCompareChangeType.Added),
+            "The differently-identified new frame should be reported as added.");
+        True(result.Differences.Any(row => row.ObjectType == ModelCompareObjectType.Frame && row.ChangeType == ModelCompareChangeType.Removed),
+            "The differently-identified old frame should be reported as removed.");
+    }
+
+    private static void SlabIdMatchesReshapedArea()
+    {
+        // Same area ID but a different footprint (reshaped/enlarged). The ID must keep it one matched slab,
+        // not a deletion plus an addition.
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        oldSnapshot.Areas[0].Uid = "MCT-slab1";
+        ModelCompareAreaObjectSnapshot reshaped = newSnapshot.Areas[0];
+        reshaped.AreaName = "A_RENUMBERED";
+        reshaped.Uid = "MCT-slab1";
+        reshaped.Corners[2] = new ModelComparePointSnapshot { X = 6, Y = 6, Z = 0 };
+        reshaped.PropertyName = "AP2";
+
+        ModelCompareComparisonResult result = Compare(oldSnapshot, newSnapshot);
+        False(result.Differences.Any(row => row.ObjectType == ModelCompareObjectType.Area &&
+                row.ChangeType is ModelCompareChangeType.Added or ModelCompareChangeType.Removed),
+            "A reshaped area sharing an ID must not be reported as added/removed.");
+        ModelCompareResultRow row = Single(result.Differences,
+            item => item.ObjectType == ModelCompareObjectType.Area && item.ObjectDescription.Contains("/ property", StringComparison.OrdinalIgnoreCase));
+        Equal(ModelCompareMatchMethod.PersistentId, row.MatchMethod, "The reshaped area should be matched by its persistent ID.");
+    }
+
+    private static void SlabEdgeNodeInsertionIgnored()
+    {
+        // A collinear edge node inserted (e.g. a beam crossing the slab edge) must not register as a change.
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        ModelCompareAreaObjectSnapshot area = newSnapshot.Areas[0];
+        area.AreaName = "A_MESHED";
+        // Original corners are (0,0)-(4,0)-(4,4)-(0,4); insert a mid-edge node at (2,0) on the first edge.
+        area.Corners.Insert(1, new ModelComparePointSnapshot { X = 2, Y = 0, Z = 0 });
+
+        False(Compare(oldSnapshot, newSnapshot).Differences.Any(row => row.ObjectType == ModelCompareObjectType.Area),
+            "Inserting a collinear edge node must not produce an area difference.");
+    }
+
+    private static void SlabRedrawSameFootprintMatches()
+    {
+        // No IDs, redrawn with a new name at the same footprint: geometry must still match it, no diff.
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        newSnapshot.Areas[0].AreaName = "A_REDRAWN";
+
+        False(Compare(oldSnapshot, newSnapshot).Differences.Any(row => row.ObjectType == ModelCompareObjectType.Area),
+            "A redrawn slab at the same footprint should match by geometry with no difference.");
+    }
+
+    private static void SlabOpeningFlagChangeDetected()
+    {
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        newSnapshot.Areas[0].IsOpening = true;
+
+        ModelCompareResultRow row = Single(Compare(oldSnapshot, newSnapshot).Differences,
+            item => item.ObjectType == ModelCompareObjectType.Area && item.ObjectDescription.Contains("/ opening", StringComparison.OrdinalIgnoreCase));
+        Equal("Slab/panel", row.OldValue, "The old area should read as a slab/panel.");
+        Equal("Opening", row.NewValue, "The new area should read as an opening.");
     }
 
     private static ModelCompareSnapshot SnapshotWithJoints(params ModelCompareJointSnapshot[] joints)
