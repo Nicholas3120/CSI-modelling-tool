@@ -19,6 +19,21 @@ public sealed class ModelCompareSnapshotResult
     public List<string> Warnings { get; set; } = [];
 }
 
+[Serializable]
+public sealed class ModelCompareMemberIdRequest
+{
+    public string? EtabsInstanceId { get; set; }
+}
+
+public sealed class ModelCompareMemberIdResult
+{
+    public bool IsError { get; set; }
+    public string Message { get; set; } = "";
+    public int StampedCount { get; set; }
+    public int ExistingCount { get; set; }
+    public List<string> Warnings { get; set; } = [];
+}
+
 public static class ModelCompareEtabsSelectionLimits
 {
     public const int MaxObjects = 500;

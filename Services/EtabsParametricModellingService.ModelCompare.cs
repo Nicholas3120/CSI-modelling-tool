@@ -59,6 +59,88 @@ public sealed partial class EtabsParametricModellingService
         return result;
     }
 
+    public ModelCompareMemberIdResult AssignFrameMemberIds(ModelCompareMemberIdRequest request)
+    {
+        var warnings = new List<string>();
+
+        try
+        {
+            ETABSv1.cOAPI etabsObject = GetEtabsObject(request.EtabsInstanceId);
+            ETABSv1.cSapModel sapModel = GetRequiredSapModelObject(etabsObject);
+
+            TryUnlockModelForDrawing(sapModel, warnings);
+
+            int numberNames = 0;
+            string[] rawNames = [];
+            int listRet = sapModel.FrameObj.GetNameList(ref numberNames, ref rawNames);
+            if (listRet != 0)
+            {
+                return new ModelCompareMemberIdResult
+                {
+                    IsError = true,
+                    Message = $"ETABS frame list could not be read for member ID assignment. Return code: {listRet}.",
+                    Warnings = warnings
+                };
+            }
+
+            List<string> frameNames = rawNames
+                .Take(Math.Min(numberNames, rawNames.Length))
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name.Trim())
+                .ToList();
+
+            int stamped = 0;
+            int existing = 0;
+            int failed = 0;
+            foreach (string name in frameNames)
+            {
+                try
+                {
+                    string guid = "";
+                    int getRet = sapModel.FrameObj.GetGUID(name, ref guid);
+                    if (getRet == 0 && !string.IsNullOrWhiteSpace(guid))
+                    {
+                        // Keep any existing ID (tool-assigned or from a Revit/IFC import) rather than overwrite it.
+                        existing++;
+                        continue;
+                    }
+
+                    int setRet = sapModel.FrameObj.SetGUID(name, ModelCompareMemberId.Prefix + Guid.NewGuid().ToString("N"));
+                    if (setRet == 0)
+                        stamped++;
+                    else
+                        failed++;
+                }
+                catch
+                {
+                    failed++;
+                }
+            }
+
+            TryRefreshEtabsView(sapModel);
+            if (failed > 0)
+                warnings.Add($"{failed} frame(s) could not be assigned a member ID.");
+
+            return new ModelCompareMemberIdResult
+            {
+                IsError = false,
+                StampedCount = stamped,
+                ExistingCount = existing,
+                Message = $"Assigned member IDs to {stamped} frame(s); {existing} already had an ID. Save the ETABS model so the IDs persist for future comparisons.",
+                Warnings = warnings
+            };
+        }
+        catch (Exception ex)
+        {
+            return new ModelCompareMemberIdResult
+            {
+                IsError = true,
+                Message = ex.Message,
+                Warnings = warnings
+            };
+        }
+    }
+
     public ModelCompareEtabsSelectionResult SelectModelCompareObjects(ModelCompareEtabsSelectionRequest request)
     {
         List<ModelCompareEtabsSelectionTarget> targets = (request.Targets ?? [])

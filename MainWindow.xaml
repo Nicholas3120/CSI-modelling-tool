@@ -4091,9 +4091,14 @@
                                       ItemsSource="{Binding EtabsInstances}"
                                       SelectedItem="{Binding SelectedEtabsInstance}"
                                       DisplayMemberPath="DisplayName"/>
-                            <Button Grid.Column="2"
-                                    Content="Create ETABS Snapshot"
-                                    Command="{Binding CreateEtabsSnapshotCommand}"/>
+                            <StackPanel Grid.Column="2" Orientation="Horizontal">
+                                <Button Content="Create ETABS Snapshot"
+                                        Command="{Binding CreateEtabsSnapshotCommand}"/>
+                                <Button Content="Assign Member IDs"
+                                        Command="{Binding AssignMemberIdsCommand}"
+                                        Margin="8,0,0,0"
+                                        ToolTip="Write a persistent ID into each ETABS frame that lacks one, so members can be tracked across revisions even if renamed or moved. Unlocks the model; save afterwards."/>
+                            </StackPanel>
                             <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="8,0,0,0">
                                 <TextBlock Text="{Binding ConnectionStatus, StringFormat=Status: {0}}"
                                            FontWeight="SemiBold"

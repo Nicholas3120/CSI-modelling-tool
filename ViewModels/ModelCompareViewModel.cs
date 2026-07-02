@@ -44,6 +44,7 @@ public sealed class ModelCompareViewModel : ObservableObject
         FilteredResults.Filter = FilterObjectResult;
         RefreshEtabsInstancesCommand = new RelayCommand(_ => RefreshEtabsInstances(), _ => !IsBusy);
         CreateEtabsSnapshotCommand = new RelayCommand(_ => CreateEtabsSnapshot(), _ => !IsBusy);
+        AssignMemberIdsCommand = new RelayCommand(_ => AssignMemberIds(), _ => !IsBusy);
         BrowseOldSnapshotCommand = new RelayCommand(_ => BrowseOldSnapshot(), _ => !IsBusy);
         BrowseNewSnapshotCommand = new RelayCommand(_ => BrowseNewSnapshot(), _ => !IsBusy);
         LoadOldSnapshotCommand = new RelayCommand(_ => LoadOldSnapshot(), _ => !IsBusy);
@@ -68,6 +69,7 @@ public sealed class ModelCompareViewModel : ObservableObject
 
     public ICommand RefreshEtabsInstancesCommand { get; }
     public ICommand CreateEtabsSnapshotCommand { get; }
+    public ICommand AssignMemberIdsCommand { get; }
     public ICommand BrowseOldSnapshotCommand { get; }
     public ICommand BrowseNewSnapshotCommand { get; }
     public ICommand LoadOldSnapshotCommand { get; }
@@ -284,6 +286,31 @@ public sealed class ModelCompareViewModel : ObservableObject
             row.ObjectDescription.Contains("/ property", StringComparison.OrdinalIgnoreCase) ||
             row.ObjectDescription.Contains("/ material", StringComparison.OrdinalIgnoreCase) ||
             row.ObjectDescription.Contains("/ thickness", StringComparison.OrdinalIgnoreCase)));
+
+    private void AssignMemberIds()
+    {
+        MessageBoxResult confirmation = MessageBox.Show(
+            "This assigns a persistent member ID to every frame in the selected ETABS model that does not already have one.\n\n" +
+            "The model will be unlocked (which clears any existing analysis results), and you should save the model afterwards so the IDs persist for future comparisons.\n\n" +
+            "Continue?",
+            "Assign member IDs",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Warning);
+        if (confirmation != MessageBoxResult.Yes)
+            return;
+
+        RunCommand("Assigning member IDs in ETABS...", () =>
+        {
+            ModelCompareMemberIdResult result = _etabsService.AssignFrameMemberIds(new ModelCompareMemberIdRequest
+            {
+                EtabsInstanceId = SelectedEtabsInstanceId
+            });
+            ShowMessages(
+                result.Warnings,
+                result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info,
+                result.Message);
+        });
+    }
 
     private void RefreshEtabsInstances()
     {

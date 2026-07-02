@@ -73,8 +73,11 @@ internal sealed class EtabsSnapshotExtractor
         if (frameNamesRead && frames.Count != expectedFrameCount)
             frameWarnings.Add($"Frame extraction was marked failed because {expectedFrameCount - frames.Count} of {expectedFrameCount} listed ETABS frames had unreadable geometry.");
 
-        // End releases are not part of the bulk frame read, so they need one GetReleases call per frame.
-        PopulateFrameReleases(_sapModel, frames, frameWarnings);
+        // End releases and persistent member IDs are not part of the bulk frame read, so they are read
+        // together in a single per-frame pass. Missing tracking IDs are stamped in-place, but only if the
+        // model is already unlocked, so extraction never clears the user's analysis results.
+        bool modelUnlocked = TryIsModelUnlocked(_sapModel);
+        PopulateFrameReleasesAndIds(_sapModel, frames, modelUnlocked, frameWarnings);
 
         var areaPropertyWarnings = new List<string>();
         bool areaPropertyNamesRead = TryGetAreaPropertyNamesForSnapshot(_sapModel, areaPropertyWarnings, out List<string> areaPropertyNames);
@@ -175,12 +178,28 @@ internal sealed class EtabsSnapshotExtractor
             : ModelCompareSnapshotReadStatus.SuccessWithWarnings;
     }
 
-    private static void PopulateFrameReleases(
+    private static bool TryIsModelUnlocked(ETABSv1.cSapModel sapModel)
+    {
+        try
+        {
+            return !sapModel.GetModelIsLocked();
+        }
+        catch
+        {
+            // If the lock state is unknown, do not write to the model.
+            return false;
+        }
+    }
+
+    private static void PopulateFrameReleasesAndIds(
         ETABSv1.cSapModel sapModel,
         IReadOnlyList<ModelCompareFrameSnapshot> frames,
+        bool assignMissingIds,
         List<string> warnings)
     {
-        int failureCount = 0;
+        int releaseFailureCount = 0;
+        int assignedIdCount = 0;
+        int missingIdCount = 0;
         foreach (ModelCompareFrameSnapshot frame in frames)
         {
             bool[] ii = [];
@@ -193,31 +212,71 @@ internal sealed class EtabsSnapshotExtractor
                 int ret = sapModel.FrameObj.GetReleases(frame.FrameName, ref ii, ref jj, ref startValue, ref endValue);
                 if (ret != 0 || ii.Length < 6 || jj.Length < 6)
                 {
-                    failureCount++;
-                    continue;
+                    releaseFailureCount++;
                 }
-
-                frame.ReleaseAxialI = ii[0];
-                frame.ReleaseShear2I = ii[1];
-                frame.ReleaseShear3I = ii[2];
-                frame.ReleaseTorsionI = ii[3];
-                frame.ReleaseMoment2I = ii[4];
-                frame.ReleaseMoment3I = ii[5];
-                frame.ReleaseAxialJ = jj[0];
-                frame.ReleaseShear2J = jj[1];
-                frame.ReleaseShear3J = jj[2];
-                frame.ReleaseTorsionJ = jj[3];
-                frame.ReleaseMoment2J = jj[4];
-                frame.ReleaseMoment3J = jj[5];
+                else
+                {
+                    frame.ReleaseAxialI = ii[0];
+                    frame.ReleaseShear2I = ii[1];
+                    frame.ReleaseShear3I = ii[2];
+                    frame.ReleaseTorsionI = ii[3];
+                    frame.ReleaseMoment2I = ii[4];
+                    frame.ReleaseMoment3I = ii[5];
+                    frame.ReleaseAxialJ = jj[0];
+                    frame.ReleaseShear2J = jj[1];
+                    frame.ReleaseShear3J = jj[2];
+                    frame.ReleaseTorsionJ = jj[3];
+                    frame.ReleaseMoment2J = jj[4];
+                    frame.ReleaseMoment3J = jj[5];
+                }
             }
             catch
             {
-                failureCount++;
+                releaseFailureCount++;
+            }
+
+            try
+            {
+                // Capture any GUID present (tool-assigned or from a Revit/IFC import) as the identity.
+                string guid = "";
+                int guidRet = sapModel.FrameObj.GetGUID(frame.FrameName, ref guid);
+                if (guidRet == 0 && !string.IsNullOrWhiteSpace(guid))
+                {
+                    frame.Uid = guid.Trim();
+                }
+                else if (assignMissingIds)
+                {
+                    // Stamp a tracking ID so this member can be followed across future revisions.
+                    string newGuid = ModelCompareMemberId.Prefix + Guid.NewGuid().ToString("N");
+                    int setRet = sapModel.FrameObj.SetGUID(frame.FrameName, newGuid);
+                    if (setRet == 0)
+                    {
+                        frame.Uid = newGuid;
+                        assignedIdCount++;
+                    }
+                    else
+                    {
+                        missingIdCount++;
+                    }
+                }
+                else
+                {
+                    missingIdCount++;
+                }
+            }
+            catch
+            {
+                // Persistent member IDs are optional; a missing one simply falls back to geometry matching.
+                missingIdCount++;
             }
         }
 
-        if (failureCount > 0)
-            warnings.Add($"ETABS end releases could not be read for {failureCount} frame(s); those frames are treated as fully continuous.");
+        if (releaseFailureCount > 0)
+            warnings.Add($"ETABS end releases could not be read for {releaseFailureCount} frame(s); those frames are treated as fully continuous.");
+        if (assignedIdCount > 0)
+            warnings.Add($"Assigned tracking IDs to {assignedIdCount} previously untracked frame(s). Save the ETABS model so these IDs persist for future comparisons.");
+        if (missingIdCount > 0)
+            warnings.Add($"{missingIdCount} frame(s) have no tracking ID (the model is locked or the ID write failed), so they are matched by geometry. Unlock the model and re-snapshot, or use Assign Member IDs, then save, to enable ID tracking.");
     }
 
     private static bool TryGetJointSnapshots(

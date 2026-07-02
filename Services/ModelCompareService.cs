@@ -153,8 +153,39 @@ public sealed class ModelCompareService
         var matchedOldIndexes = new HashSet<int>();
         var matchedNewIndexes = new HashSet<int>();
 
+        // Persistent-ID pass: frames that share a tool-owned member ID are the same physical member even
+        // if renamed or relocated. It runs before geometry so a confirmed identity always wins.
+        Dictionary<string, int> newFramesByUid = BuildFrameUidLookup(orderedNewFrames);
         for (int oldIndex = 0; oldIndex < orderedOldFrames.Count; oldIndex++)
         {
+            ModelCompareFrameSnapshot oldFrame = orderedOldFrames[oldIndex];
+            if (string.IsNullOrWhiteSpace(oldFrame.Uid))
+                continue;
+            if (!newFramesByUid.TryGetValue(oldFrame.Uid.Trim(), out int newIndex) || matchedNewIndexes.Contains(newIndex))
+                continue;
+
+            ModelCompareFrameSnapshot uidNewFrame = orderedNewFrames[newIndex];
+            matchedOldIndexes.Add(oldIndex);
+            matchedNewIndexes.Add(newIndex);
+            int uidResultStart = results.Count;
+            if (!IsSamePhysicalFrame(oldFrame, uidNewFrame, settings.CoordinateTolerance))
+                AddFrameMovedDifference(oldFrame, uidNewFrame, settings, ModelCompareConfidenceLevel.High, results);
+            CompareMatchedFrame(oldFrame, uidNewFrame, settings, compareMaterialAssignments, results);
+            ApplyDiagnostics(results, uidResultStart, BuildFrameDiagnostics(
+                oldFrame,
+                uidNewFrame,
+                ModelCompareMatchMethod.PersistentId,
+                ModelCompareConfidenceLevel.High,
+                "Matched by tool-owned persistent member ID."));
+            ApplySearchContext(results, uidResultStart, BuildFrameSearchText(oldFrame, uidNewFrame));
+            ApplyFrameNavigationContext(results, uidResultStart, oldFrame, uidNewFrame);
+        }
+
+        for (int oldIndex = 0; oldIndex < orderedOldFrames.Count; oldIndex++)
+        {
+            if (matchedOldIndexes.Contains(oldIndex))
+                continue;
+
             ModelCompareFrameSnapshot oldFrame = orderedOldFrames[oldIndex];
             ModelCompareFrameSnapshot? newFrame = null;
             ModelCompareMatchMethod matchMethod = ModelCompareMatchMethod.Unmatched;
@@ -945,6 +976,22 @@ public sealed class ModelCompareService
         return lookup;
     }
 
+    private static Dictionary<string, int> BuildFrameUidLookup(IReadOnlyList<ModelCompareFrameSnapshot> frames)
+    {
+        var lookup = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        for (int index = 0; index < frames.Count; index++)
+        {
+            string uid = (frames[index].Uid ?? "").Trim();
+            if (string.IsNullOrWhiteSpace(uid))
+                continue;
+
+            // First occurrence wins; a duplicated ID (should not happen) falls through to geometry matching.
+            lookup.TryAdd(uid, index);
+        }
+
+        return lookup;
+    }
+
     private static Dictionary<string, Queue<int>> BuildFrameNameLookup(IReadOnlyList<ModelCompareFrameSnapshot> frames)
     {
         var lookup = new Dictionary<string, Queue<int>>(StringComparer.OrdinalIgnoreCase);
@@ -1139,7 +1186,7 @@ public sealed class ModelCompareService
         string reason,
         double confidence = 1.0)
     {
-        bool movedMatch = matchMethod is ModelCompareMatchMethod.SameFrameName or ModelCompareMatchMethod.NearGeometry;
+        bool movedMatch = matchMethod is ModelCompareMatchMethod.SameFrameName or ModelCompareMatchMethod.NearGeometry or ModelCompareMatchMethod.PersistentId;
         return new ComparisonDiagnostics(
             matchMethod,
             confidenceLevel,

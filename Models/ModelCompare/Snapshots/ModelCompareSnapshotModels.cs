@@ -3,7 +3,17 @@ namespace CSIModellingTools.Models;
 public static class ModelCompareSchema
 {
     // v4: added joint objects (restraints) and frame end releases.
-    public const int CurrentVersion = 4;
+    // v5: added tool-owned persistent member IDs (frames).
+    public const int CurrentVersion = 5;
+}
+
+public static class ModelCompareMemberId
+{
+    // Prefix that marks a GUID as one this tool assigned (as opposed to a GUID from a Revit/IFC import).
+    public const string Prefix = "MCT-";
+
+    public static bool IsToolOwned(string? guid) =>
+        !string.IsNullOrWhiteSpace(guid) && guid.StartsWith(Prefix, StringComparison.OrdinalIgnoreCase);
 }
 
 public enum ModelCompareSnapshotReadStatus
@@ -54,6 +64,7 @@ public sealed class ModelCompareSnapshotMetadata
 public sealed class ModelCompareFrameSnapshot
 {
     public string FrameName { get; set; } = "";
+    public string Uid { get; set; } = "";
     public string Label { get; set; } = "";
     public string Story { get; set; } = "";
     public string PointIName { get; set; } = "";

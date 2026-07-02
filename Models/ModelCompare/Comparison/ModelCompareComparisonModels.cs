@@ -72,6 +72,7 @@ public enum ModelCompareConfidenceLevel
 public enum ModelCompareMatchMethod
 {
     NotApplicable,
+    PersistentId,
     ExactCoordinates,
     ReversedIJ,
     SameFrameName,

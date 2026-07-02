@@ -37,7 +37,10 @@ internal static class Program
             ("Joint support removed", JointSupportRemoved),
             ("Unchanged joints produce no diff", UnchangedJointsProduceNoDiff),
             ("Legacy snapshot skips joint comparison", LegacySnapshotSkipsJointComparison),
-            ("Frame end release change detected", FrameEndReleaseChangeDetected)
+            ("Frame end release change detected", FrameEndReleaseChangeDetected),
+            ("Persistent ID matches relocated frame", PersistentIdMatchesRelocatedFrame),
+            ("Persistent ID beats geometry ambiguity", PersistentIdSurvivesRename),
+            ("Frames without IDs still use geometry", FramesWithoutIdsUseGeometry)
         ];
 
         int failed = 0;
@@ -374,6 +377,56 @@ internal static class Program
                     item.ObjectDescription.Contains("J-end release", StringComparison.OrdinalIgnoreCase));
         Equal("Continuous", row.OldValue, "The old J end should read as continuous.");
         Equal("Pinned (M2, M3)", row.NewValue, "The new J end should read as a pinned connection.");
+    }
+
+    private static void PersistentIdMatchesRelocatedFrame()
+    {
+        // Same member ID, but relocated far beyond any geometry search distance: without the ID this would
+        // read as one deletion plus one addition. The ID must keep it a single matched (moved) member.
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        oldSnapshot.Frames[0].Uid = "MCT-abc";
+        ModelCompareFrameSnapshot moved = newSnapshot.Frames[0];
+        moved.FrameName = "RENAMED";
+        moved.Uid = "MCT-abc";
+        moved.IX = 100; moved.JX = 100;
+
+        ModelCompareComparisonResult result = Compare(oldSnapshot, newSnapshot);
+        False(result.Differences.Any(row => row.ObjectType == ModelCompareObjectType.Frame &&
+                row.ChangeType is ModelCompareChangeType.Added or ModelCompareChangeType.Removed),
+            "A relocated frame sharing a member ID must not be reported as added/removed.");
+        ModelCompareResultRow movedRow = Single(result.Differences,
+            item => item.ObjectType == ModelCompareObjectType.Frame && item.ChangeType == ModelCompareChangeType.Moved);
+        Equal(ModelCompareMatchMethod.PersistentId, movedRow.MatchMethod, "The relocated frame should be matched by its persistent ID.");
+    }
+
+    private static void PersistentIdSurvivesRename()
+    {
+        // Same ID and position, renamed, with a section change: matched by ID and reports only the section.
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        oldSnapshot.Frames[0].Uid = "MCT-xyz";
+        newSnapshot.Frames[0].Uid = "MCT-xyz";
+        newSnapshot.Frames[0].FrameName = "RENAMED";
+        newSnapshot.Frames[0].SectionName = "S2";
+
+        ModelCompareResultRow row = Single(Compare(oldSnapshot, newSnapshot).Differences,
+            item => item.ObjectType == ModelCompareObjectType.Frame && item.ObjectDescription.Contains("/ section", StringComparison.OrdinalIgnoreCase));
+        Equal(ModelCompareMatchMethod.PersistentId, row.MatchMethod, "A renamed frame with a shared ID should be matched by that ID.");
+        Equal("S2", row.NewValue, "The section change should still be reported.");
+    }
+
+    private static void FramesWithoutIdsUseGeometry()
+    {
+        // No member IDs: matching must fall back to geometry exactly as before.
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        newSnapshot.Frames[0].FrameName = "REDRAWN";
+        newSnapshot.Frames[0].SectionName = "S2";
+
+        ModelCompareResultRow row = Single(Compare(oldSnapshot, newSnapshot).Differences,
+            item => item.ObjectType == ModelCompareObjectType.Frame && item.ObjectDescription.Contains("/ section", StringComparison.OrdinalIgnoreCase));
+        Equal(ModelCompareMatchMethod.ExactCoordinates, row.MatchMethod, "Without member IDs, delete+redraw at the same position should still match by coordinates.");
     }
 
     private static ModelCompareSnapshot SnapshotWithJoints(params ModelCompareJointSnapshot[] joints)

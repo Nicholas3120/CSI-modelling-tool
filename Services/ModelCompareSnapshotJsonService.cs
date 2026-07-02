@@ -262,7 +262,10 @@ public sealed class ModelCompareSnapshotJsonService
             snapshot.Joints = snapshot.Joints.Where(joint => joint != null).ToList();
 
         foreach (ModelCompareFrameSnapshot frame in snapshot.Frames)
+        {
             frame.GroupNames ??= [];
+            frame.Uid ??= "";
+        }
 
         return new ModelCompareSnapshotValidationResult
         {
