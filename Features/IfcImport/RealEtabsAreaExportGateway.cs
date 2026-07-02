@@ -60,6 +60,11 @@ public sealed class RealEtabsAreaExportGateway : IEtabsAreaExportGateway
         }
     }
 
+    public void SetupStories(IReadOnlyList<IfcStoreyLevel> storeyLevels)
+    {
+        EtabsStorySetup.Configure(GetSapModel(), storeyLevels);
+    }
+
     public bool MaterialExists(string materialName)
     {
         string normalized = (materialName ?? "").Trim();
@@ -228,6 +233,17 @@ public sealed class RealEtabsAreaExportGateway : IEtabsAreaExportGateway
         if (ret != 0 || string.IsNullOrWhiteSpace(areaName))
             throw new InvalidOperationException($"ETABS could not create area object. Return code: {ret}.");
 
+        // Enable auto edge constraints so the slab ties to coplanar frames even when the
+        // slab mesh and beam nodes do not line up — part of the gravity load path.
+        try
+        {
+            GetSapModel().AreaObj.SetEdgeConstraint(areaName, true, EtabsObjects);
+        }
+        catch
+        {
+            // Edge constraints are a connection aid; a failure here must not stop the export.
+        }
+
         return areaName;
     }
 
@@ -239,6 +255,11 @@ public sealed class RealEtabsAreaExportGateway : IEtabsAreaExportGateway
         int ret = GetSapModel().AreaObj.SetGroupAssign(area, group, false, EtabsObjects);
         if (ret != 0)
             throw new InvalidOperationException($"ETABS could not assign area '{area}' to group '{group}'. Return code: {ret}.");
+    }
+
+    public int AssignRigidDiaphragms()
+    {
+        return EtabsDiaphragmSetup.Configure(GetSapModel());
     }
 
     public void Dispose()

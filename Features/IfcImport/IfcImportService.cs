@@ -21,6 +21,7 @@ public sealed class IfcImportService
     private readonly StoreyDetector _storeyDetector = new();
     private readonly CoordinateOriginService _coordinateOriginService = new();
     private readonly AreaRecognitionService _areaRecognitionService = new();
+    private readonly AreaMeshRecoveryService _areaMeshRecoveryService = new();
     private readonly AdvancedFrameGeometryRecognitionService _advancedFrameGeometryRecognitionService = new();
     private readonly AnalyticalFrameConditioningService _frameConditioningService = new();
 
@@ -50,6 +51,9 @@ public sealed class IfcImportService
         progress?.Report(new IfcImportProgress(0, "Reading model data...", false));
         double lengthFactor = ResolveLengthFactor(model, options, result);
         IReadOnlyList<IfcStoreyInfo> storeys = _storeyDetector.ReadStoreys(model, lengthFactor);
+        result.StoreyLevels = storeys
+            .Select(storey => new IfcStoreyLevel { Name = storey.Name, Elevation = storey.Elevation })
+            .ToList();
         var candidates = EnumerateCandidates(model, options).ToList();
         var areaCandidates = EnumerateAreaCandidates(model, options).ToList();
 
@@ -121,6 +125,17 @@ public sealed class IfcImportService
         result.Warnings.AddRange(_duplicateFrameDetector.DetectDuplicates(result.Frames, options.DuplicateFrameTolerance, options.DuplicateSectionTolerance));
         result.Warnings.AddRange(_shortMemberDetector.DetectShortMembers(result.Frames, options.ShortMemberMinimumLength));
         result.Warnings.AddRange(_connectivityChecker.CheckBeamEndpointConnectivity(result.Frames, options.ConnectivityTolerance));
+
+        // Derive ETABS story levels from the final geometry (slab/beam elevations). The IFC
+        // building storeys are unreliable here (incomplete for towers), so geometry levels are
+        // used for the story system and IFC storey names are borrowed where they line up.
+        result.StoreyLevels = DeriveStoryLevels(result, result.StoreyLevels);
+
+        // Snap floor elements to their story elevation so the slabs and beams at each level are
+        // coplanar — the condition ETABS needs to mesh the slab onto the beams (the gravity load
+        // path). Columns still span level-to-level and tie the floors vertically.
+        if (options.ApplyFrameConditioning)
+            SnapToWorkPlanes(result);
         progress?.Report(new IfcImportProgress(100, "Done", true));
 
         result.ImportedAreaCount = result.Areas.Count;
@@ -243,6 +258,18 @@ public sealed class IfcImportService
         IfcImportResult result)
     {
         AreaRecognitionResult areaResult = _areaRecognitionService.TryCreateArea(candidate.Product, candidate.IfcType, lengthFactor);
+
+        // Walls and slabs exported as a triangle mesh instead of an extrusion (~39% of walls in
+        // this project) have no SweptSolid, so recognition returns nothing. Recover their
+        // analytical surface from the mesh so they are not silently dropped.
+        if (areaResult.Area == null && options.RecoverMeshGeometry)
+        {
+            AreaRecognitionResult meshResult = _areaMeshRecoveryService.TryRecoverArea(candidate.Product, candidate.IfcType, lengthFactor);
+            result.Warnings.AddRange(meshResult.Warnings);
+            if (meshResult.Area != null)
+                areaResult = meshResult;
+        }
+
         if (areaResult.Area == null)
         {
             string reason = string.IsNullOrWhiteSpace(areaResult.SkipReason)
@@ -260,6 +287,35 @@ public sealed class IfcImportService
         }
 
         AnalyticalAreaElement area = areaResult.Area;
+
+        // Cull non-structural walls so facade cladding is not modelled as shear walls (which
+        // over-stiffens the building). Prefer the IFC's own LoadBearing/facade metadata; fall
+        // back to thickness only when those properties are absent.
+        if (options.StructuralWallsOnly
+            && string.Equals(area.IfcType, "IfcWall", StringComparison.OrdinalIgnoreCase))
+        {
+            bool? structural = WallStructuralClassifier.IsStructural(candidate.Product);
+            string? excludeReason = structural switch
+            {
+                false => "Non-structural wall excluded by IFC metadata (not LoadBearing, or flagged as facade cladding).",
+                null when area.Thickness > 0 && area.Thickness < options.MinimumStructuralWallThickness
+                    => $"Non-structural wall excluded: thickness {area.Thickness * 1000.0:0} mm is below the {options.MinimumStructuralWallThickness * 1000.0:0} mm structural threshold.",
+                _ => null
+            };
+
+            if (excludeReason != null)
+            {
+                result.SkippedElements.Add(new SkippedIfcElement
+                {
+                    SourceGuid = GetGuid(candidate.Product),
+                    SourceName = GetName(candidate.Product),
+                    IfcType = candidate.IfcType,
+                    Reason = excludeReason
+                });
+                result.Warnings.AddRange(areaResult.Warnings);
+                return;
+            }
+        }
         area.StoreyName = _storeyDetector.ResolveStoreyName(candidate.Product, area, storeys, options.StoreyElevationTolerance);
         IfcImportWarning? unknownStoreyWarning = _storeyDetector.BuildUnknownStoreyWarning(area);
         if (unknownStoreyWarning != null)
@@ -1012,6 +1068,157 @@ public sealed class IfcImportService
     // Guards against unit-scale errors: after import, a model whose members are far
     // outside any plausible structural range almost always means the length unit was
     // misread. Flag it loudly so a wrong-scale import is never accepted silently.
+    // Clusters the elevations of horizontal members (slabs and beams) into floor levels for
+    // the ETABS story system, since these mark where the structure actually is. IFC storey
+    // names are reused when a level lands near one; otherwise a level is named generically.
+    private static List<IfcStoreyLevel> DeriveStoryLevels(IfcImportResult result, IReadOnlyList<IfcStoreyLevel> ifcStoreys)
+    {
+        var candidates = new List<double>();
+        foreach (AnalyticalAreaElement area in result.Areas)
+        {
+            if (area.BoundaryPoints.Count > 0)
+                candidates.Add(area.BoundaryPoints.Average(point => point.Z));
+        }
+
+        foreach (AnalyticalFrameElement frame in result.Frames)
+        {
+            double length = Distance(frame.StartPoint, frame.EndPoint);
+            double verticalDrop = Math.Abs(frame.EndPoint.Z - frame.StartPoint.Z);
+            if (length > ZeroLengthTolerance && verticalDrop / length < 0.30)
+                candidates.Add((frame.StartPoint.Z + frame.EndPoint.Z) / 2.0);
+        }
+
+        if (candidates.Count == 0)
+            return [];
+
+        candidates.Sort();
+
+        // Greedy clustering: sub-floor noise (<~1.5 m spread) merges; real ~3 m floor gaps split.
+        const double mergeWindowMetres = 1.5;
+        var clusters = new List<(double Sum, int Count)>();
+        foreach (double z in candidates)
+        {
+            if (clusters.Count > 0)
+            {
+                (double sum, int count) = clusters[^1];
+                if (z - sum / count <= mergeWindowMetres)
+                {
+                    clusters[^1] = (sum + z, count + 1);
+                    continue;
+                }
+            }
+
+            clusters.Add((z, 1));
+        }
+
+        int supportThreshold = Math.Max(10, candidates.Count / 400);
+        List<double> levels = clusters
+            .Where(cluster => cluster.Count >= supportThreshold)
+            .Select(cluster => cluster.Sum / cluster.Count)
+            .OrderBy(z => z)
+            .ToList();
+        if (levels.Count < 2)
+            return [];
+
+        // Anchor the base at the true bottom of the structure (e.g. column bases), which sits
+        // below the lowest floor level, so nothing ends up beneath the lowest ETABS story.
+        double minZ = MinimumGeometryElevation(result);
+        if (double.IsFinite(minZ) && minZ < levels[0] - 0.5)
+            levels.Insert(0, minZ);
+
+        var storeyLevels = new List<IfcStoreyLevel>();
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        for (int i = 0; i < levels.Count; i++)
+        {
+            string name = NearestStoreyName(ifcStoreys, levels[i], 1.0) ?? $"Level {i + 1}";
+            string unique = name;
+            int suffix = 2;
+            while (!usedNames.Add(unique))
+                unique = $"{name}_{suffix++}";
+
+            storeyLevels.Add(new IfcStoreyLevel { Name = unique, Elevation = levels[i] });
+        }
+
+        return storeyLevels;
+    }
+
+    private static void SnapToWorkPlanes(IfcImportResult result)
+    {
+        if (result.StoreyLevels.Count == 0)
+            return;
+
+        double[] elevations = result.StoreyLevels
+            .Select(level => level.Elevation)
+            .OrderBy(z => z)
+            .ToArray();
+        const double snapTolerance = 1.2;   // half a typical storey height — catches floor spread, not mid-height
+
+        foreach (AnalyticalFrameElement frame in result.Frames)
+        {
+            SnapPointToLevel(frame.StartPoint, elevations, snapTolerance);
+            SnapPointToLevel(frame.EndPoint, elevations, snapTolerance);
+        }
+
+        foreach (AnalyticalAreaElement area in result.Areas)
+        {
+            foreach (AnalyticalPoint point in area.BoundaryPoints)
+                SnapPointToLevel(point, elevations, snapTolerance);
+        }
+    }
+
+    private static void SnapPointToLevel(AnalyticalPoint point, double[] elevations, double tolerance)
+    {
+        double best = double.NaN;
+        double bestDistance = tolerance;
+        foreach (double elevation in elevations)
+        {
+            double distance = Math.Abs(elevation - point.Z);
+            if (distance <= bestDistance)
+            {
+                bestDistance = distance;
+                best = elevation;
+            }
+        }
+
+        if (!double.IsNaN(best))
+            point.Z = best;
+    }
+
+    private static double MinimumGeometryElevation(IfcImportResult result)
+    {
+        double minZ = double.PositiveInfinity;
+        foreach (AnalyticalFrameElement frame in result.Frames)
+        {
+            minZ = Math.Min(minZ, frame.StartPoint.Z);
+            minZ = Math.Min(minZ, frame.EndPoint.Z);
+        }
+
+        foreach (AnalyticalAreaElement area in result.Areas)
+        {
+            foreach (AnalyticalPoint point in area.BoundaryPoints)
+                minZ = Math.Min(minZ, point.Z);
+        }
+
+        return minZ;
+    }
+
+    private static string? NearestStoreyName(IReadOnlyList<IfcStoreyLevel> storeys, double elevation, double tolerance)
+    {
+        string? best = null;
+        double bestDistance = tolerance;
+        foreach (IfcStoreyLevel storey in storeys)
+        {
+            double distance = Math.Abs(storey.Elevation - elevation);
+            if (distance <= bestDistance && !string.IsNullOrWhiteSpace(storey.Name))
+            {
+                bestDistance = distance;
+                best = storey.Name;
+            }
+        }
+
+        return best;
+    }
+
     private static void AddScaleSanityWarning(IfcImportResult result, double lengthFactor)
     {
         if (result.Frames.Count == 0)

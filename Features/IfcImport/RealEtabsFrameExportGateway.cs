@@ -61,6 +61,11 @@ public sealed class RealEtabsFrameExportGateway : IEtabsFrameExportGateway
         }
     }
 
+    public void SetupStories(IReadOnlyList<IfcStoreyLevel> storeyLevels)
+    {
+        EtabsStorySetup.Configure(GetSapModel(), storeyLevels);
+    }
+
     public bool MaterialExists(string materialName)
     {
         string normalized = (materialName ?? "").Trim();
@@ -254,6 +259,11 @@ public sealed class RealEtabsFrameExportGateway : IEtabsFrameExportGateway
         int ret = GetSapModel().FrameObj.SetGroupAssign(frame, group, false, EtabsObjects);
         if (ret != 0)
             throw new InvalidOperationException($"ETABS could not assign frame '{frame}' to group '{group}'. Return code: {ret}.");
+    }
+
+    public int AssignRigidDiaphragms()
+    {
+        return EtabsDiaphragmSetup.Configure(GetSapModel());
     }
 
     public void Dispose()

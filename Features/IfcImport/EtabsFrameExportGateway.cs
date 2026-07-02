@@ -6,6 +6,7 @@ public interface IEtabsFrameExportGateway : IDisposable
     void CreateNewModel(IfcEtabsUnits units);
     void SetUnits(IfcEtabsUnits units);
     void EnsureUnlocked();
+    void SetupStories(IReadOnlyList<IfcStoreyLevel> storeyLevels);
     bool MaterialExists(string materialName);
     void CreateMaterial(string materialName, EtabsMaterialKind materialKind);
     bool FrameSectionExists(string sectionName);
@@ -13,6 +14,7 @@ public interface IEtabsFrameExportGateway : IDisposable
     void EnsureGroup(string groupName);
     string AddFrameByCoordinates(AnalyticalPoint start, AnalyticalPoint end, string sectionName, string preferredName);
     void AssignFrameToGroup(string frameName, string groupName);
+    int AssignRigidDiaphragms();
 }
 
 public enum EtabsMaterialKind
@@ -43,6 +45,10 @@ public sealed class MockEtabsFrameExportGateway : IEtabsFrameExportGateway
     }
 
     public void EnsureUnlocked()
+    {
+    }
+
+    public void SetupStories(IReadOnlyList<IfcStoreyLevel> storeyLevels)
     {
     }
 
@@ -83,6 +89,11 @@ public sealed class MockEtabsFrameExportGateway : IEtabsFrameExportGateway
     public void AssignFrameToGroup(string frameName, string groupName)
     {
         _groups.Add(groupName);
+    }
+
+    public int AssignRigidDiaphragms()
+    {
+        return 0;
     }
 
     public void Dispose()

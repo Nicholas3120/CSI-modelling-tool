@@ -18,7 +18,7 @@ public sealed class EtabsFrameExporter : IEtabsFrameExporter
         _gatewayFactory = gatewayFactory;
     }
 
-    public EtabsExportResult ExportFramesToEtabs(IfcImportResult result, EtabsExportOptions options, IProgress<EtabsExportProgress>? progress = null)
+    public EtabsExportResult ExportFramesToEtabs(IfcImportResult result, EtabsExportOptions options, IProgress<EtabsExportProgress>? progress = null, bool assignDiaphragms = true)
     {
         options ??= new EtabsExportOptions();
         var exportResult = new EtabsExportResult();
@@ -39,6 +39,21 @@ public sealed class EtabsFrameExporter : IEtabsFrameExporter
 
             gateway.SetUnits(options.EtabsUnits);
             gateway.EnsureUnlocked();
+            try
+            {
+                gateway.SetupStories(result.StoreyLevels);
+            }
+            catch (Exception storyEx)
+            {
+                // Story setup must never abort the geometry export; report and continue.
+                exportResult.Warnings.Add(new EtabsExportWarning
+                {
+                    Severity = EtabsExportWarningSeverity.Warning,
+                    Category = EtabsExportWarningCategory.Export,
+                    Message = "ETABS story system was not set (exporting without stories): " + storyEx.Message
+                });
+            }
+
             gateway.EnsureGroup(options.ExportGroupName);
 
             int total = result.Frames.Count;
@@ -59,6 +74,9 @@ public sealed class EtabsFrameExporter : IEtabsFrameExporter
                 }
             }
 
+            if (assignDiaphragms)
+                RunDiaphragmStep(gateway.AssignRigidDiaphragms, exportResult, progress);
+
             exportResult.IsError = false;
             exportResult.Message = $"Exported {exportResult.ExportedFrameCount} IFC frame(s) to ETABS. Skipped {exportResult.SkippedFrameCount}.";
         }
@@ -75,6 +93,32 @@ public sealed class EtabsFrameExporter : IEtabsFrameExporter
         }
 
         return exportResult;
+    }
+
+    // Shared by frame and area export: run the rigid-diaphragm assignment once objects exist,
+    // non-fatally, so a diaphragm failure never discards the geometry export.
+    internal static void RunDiaphragmStep(Func<int> assign, EtabsExportResult result, IProgress<EtabsExportProgress>? progress)
+    {
+        try
+        {
+            progress?.Report(new EtabsExportProgress(100, "Assigning rigid diaphragms..."));
+            int stories = assign();
+            result.Warnings.Add(new EtabsExportWarning
+            {
+                Severity = EtabsExportWarningSeverity.Info,
+                Category = EtabsExportWarningCategory.Export,
+                Message = $"Assigned a rigid diaphragm to {stories} story level(s)."
+            });
+        }
+        catch (Exception ex)
+        {
+            result.Warnings.Add(new EtabsExportWarning
+            {
+                Severity = EtabsExportWarningSeverity.Warning,
+                Category = EtabsExportWarningCategory.Export,
+                Message = "Rigid diaphragm assignment failed (exported without diaphragms): " + ex.Message
+            });
+        }
     }
 
     private static void ExportFrame(

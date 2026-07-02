@@ -4469,6 +4469,10 @@
                                       VerticalAlignment="Center"/>
                             <CheckBox Content="Recover mesh-only members"
                                       IsChecked="{Binding RecoverMeshGeometry}"
+                                      Margin="0,0,18,0"
+                                      VerticalAlignment="Center"/>
+                            <CheckBox Content="Structural walls only (exclude partitions)"
+                                      IsChecked="{Binding StructuralWallsOnly}"
                                       VerticalAlignment="Center"/>
                         </WrapPanel>
                     </GroupBox>

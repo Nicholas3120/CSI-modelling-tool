@@ -33,6 +33,10 @@ public sealed class CoordinateOriginService
                 Offset(point, origin);
         }
 
+        // Keep storey levels in the same shifted frame as the geometry so ETABS stories line up.
+        foreach (IfcStoreyLevel level in result.StoreyLevels)
+            level.Elevation -= origin.Z;
+
         string message = $"Coordinate origin reset applied. Offset removed: X={origin.X:0.###} m, Y={origin.Y:0.###} m, Z={origin.Z:0.###} m.";
         result.CoordinateOffset = new IfcCoordinateOffsetInfo
         {

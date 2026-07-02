@@ -62,6 +62,14 @@ public sealed class AreaRecognitionService
             return result;
         }
 
+        // A wall is a thin footprint extruded vertically by its height. Offsetting that profile
+        // by half the extrusion depth (the slab logic) would give a flat sliver at mid-height,
+        // so instead build the analytical mid-surface as a vertical rectangle along the
+        // footprint centreline. Horizontally-extruded walls fall through to the slab logic,
+        // which already produces the correct vertical surface for that case.
+        if (string.Equals(ifcType, "IfcWall", StringComparison.OrdinalIgnoreCase) && Math.Abs(direction.Z) > 0.7)
+            return BuildWallArea(product, ifcType, profileBoundary, direction, extrusionDepth, transform, lengthFactor, result);
+
         double halfDepth = extrusionDepth / 2.0;
         List<AnalyticalPoint> boundary = profileBoundary
             .Select(point => TransformPoint(
@@ -118,6 +126,98 @@ public sealed class AreaRecognitionService
 
         foreach (IfcImportWarning warning in result.Warnings.Where(warning => warning.Category is IfcImportWarningCategory.Opening or IfcImportWarningCategory.Boundary))
             area.Warnings.Add(warning.Message);
+
+        result.Area = area;
+        return result;
+    }
+
+    private AreaRecognitionResult BuildWallArea(
+        IIfcProduct product,
+        string ifcType,
+        List<ProfilePoint> footprint,
+        DirectionVector direction,
+        double depth,
+        XbimMatrix3D transform,
+        double lengthFactor,
+        AreaRecognitionResult result)
+    {
+        double cx = footprint.Average(point => point.X);
+        double cy = footprint.Average(point => point.Y);
+
+        // Long axis (wall run) = the two most-separated footprint points.
+        ProfilePoint anchor = footprint[0];
+        ProfilePoint end1 = footprint.OrderByDescending(p => (p.X - anchor.X) * (p.X - anchor.X) + (p.Y - anchor.Y) * (p.Y - anchor.Y)).First();
+        ProfilePoint end2 = footprint.OrderByDescending(p => (p.X - end1.X) * (p.X - end1.X) + (p.Y - end1.Y) * (p.Y - end1.Y)).First();
+        double ux = end2.X - end1.X;
+        double uy = end2.Y - end1.Y;
+        double uLength = Math.Sqrt(ux * ux + uy * uy);
+        if (uLength <= 1e-6)
+        {
+            result.SkipReason = "Wall footprint is degenerate (no run direction).";
+            return result;
+        }
+
+        ux /= uLength;
+        uy /= uLength;
+        double vx = -uy;   // perpendicular = thickness direction
+        double vy = ux;
+
+        double tMin = double.PositiveInfinity, tMax = double.NegativeInfinity;
+        double sMin = double.PositiveInfinity, sMax = double.NegativeInfinity;
+        foreach (ProfilePoint point in footprint)
+        {
+            double t = (point.X - cx) * ux + (point.Y - cy) * uy;
+            double s = (point.X - cx) * vx + (point.Y - cy) * vy;
+            tMin = Math.Min(tMin, t); tMax = Math.Max(tMax, t);
+            sMin = Math.Min(sMin, s); sMax = Math.Max(sMax, s);
+        }
+
+        double length = tMax - tMin;
+        double thickness = sMax - sMin;
+        if (length <= 1e-6)
+        {
+            result.SkipReason = "Wall length is degenerate.";
+            return result;
+        }
+
+        double startX = cx + ux * tMin, startY = cy + uy * tMin;
+        double endX = cx + ux * tMax, endY = cy + uy * tMax;
+
+        // Vertical rectangle: centreline at the extrusion base up to the extrusion top.
+        AnalyticalPoint Vertical(double px, double py, double height) =>
+            TransformPoint(transform, px + direction.X * height, py + direction.Y * height, direction.Z * height, lengthFactor);
+        var boundary = new List<AnalyticalPoint>
+        {
+            Vertical(startX, startY, 0),
+            Vertical(endX, endY, 0),
+            Vertical(endX, endY, depth),
+            Vertical(startX, startY, depth)
+        };
+
+        if (HasOpenings(product))
+            result.Warnings.Add(BuildWarning(product, ifcType, IfcImportWarningSeverity.Warning, IfcImportWarningCategory.Opening, "Openings are present and were ignored in the analytical wall surface."));
+
+        bool cleanWallShape = thickness > 1e-6 && thickness < length;
+        if (!cleanWallShape)
+            result.Warnings.Add(BuildWarning(product, ifcType, IfcImportWarningSeverity.Warning, IfcImportWarningCategory.Boundary, "Wall footprint is not a clean thin rectangle; centreline and thickness are approximate."));
+
+        var area = new AnalyticalAreaElement
+        {
+            SourceGuid = GetGuid(product),
+            SourceName = GetName(product),
+            IfcType = ifcType,
+            BoundaryPoints = boundary,
+            Thickness = thickness * lengthFactor,
+            MaterialName = ResolveMaterialName(product),
+            RecognitionMethod = IfcRecognitionMethod.SweptSolid,
+            Confidence = cleanWallShape ? IfcRecognitionConfidence.High : IfcRecognitionConfidence.Medium
+        };
+
+        if (area.MaterialName.Length == 0)
+        {
+            area.MaterialName = UnknownMaterial;
+            area.Warnings.Add("No IFC material association was found; assigned UNKNOWN_MATERIAL.");
+        }
 
         result.Area = area;
         return result;
