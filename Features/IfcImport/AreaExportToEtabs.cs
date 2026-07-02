@@ -15,7 +15,7 @@ public sealed class AreaExportToEtabs : IEtabsAreaExporter
         _gatewayFactory = gatewayFactory;
     }
 
-    public EtabsExportResult ExportAreasToEtabs(IfcImportResult result, EtabsExportOptions options, IProgress<EtabsExportProgress>? progress = null)
+    public EtabsExportResult ExportAreasToEtabs(IfcImportResult result, EtabsExportOptions options, IProgress<EtabsExportProgress>? progress = null, bool assignDiaphragms = true)
     {
         options ??= new EtabsExportOptions();
         var exportResult = new EtabsExportResult();
@@ -36,6 +36,8 @@ public sealed class AreaExportToEtabs : IEtabsAreaExporter
 
             gateway.SetUnits(options.EtabsUnits);
             gateway.EnsureUnlocked();
+            // Stories are set once by the frame export; the area export must not redefine them
+            // (that would fail on the now-populated model), it just adds areas.
             gateway.EnsureGroup(options.ExportGroupName);
 
             int total = result.Areas.Count;
@@ -55,6 +57,9 @@ public sealed class AreaExportToEtabs : IEtabsAreaExporter
                     }
                 }
             }
+
+            if (assignDiaphragms)
+                EtabsFrameExporter.RunDiaphragmStep(gateway.AssignRigidDiaphragms, exportResult, progress);
 
             exportResult.IsError = false;
             exportResult.Message = $"Exported {exportResult.ExportedAreaCount} IFC area(s) to ETABS. Skipped {exportResult.SkippedAreaCount}.";

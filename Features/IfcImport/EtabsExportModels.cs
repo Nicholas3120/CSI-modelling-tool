@@ -37,12 +37,12 @@ public readonly record struct EtabsExportProgress(double Percent, string Stage);
 
 public interface IEtabsFrameExporter
 {
-    EtabsExportResult ExportFramesToEtabs(IfcImportResult result, EtabsExportOptions options, IProgress<EtabsExportProgress>? progress = null);
+    EtabsExportResult ExportFramesToEtabs(IfcImportResult result, EtabsExportOptions options, IProgress<EtabsExportProgress>? progress = null, bool assignDiaphragms = true);
 }
 
 public interface IEtabsAreaExporter
 {
-    EtabsExportResult ExportAreasToEtabs(IfcImportResult result, EtabsExportOptions options, IProgress<EtabsExportProgress>? progress = null);
+    EtabsExportResult ExportAreasToEtabs(IfcImportResult result, EtabsExportOptions options, IProgress<EtabsExportProgress>? progress = null, bool assignDiaphragms = true);
 }
 
 public sealed class EtabsExportOptions

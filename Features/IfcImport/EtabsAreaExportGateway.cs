@@ -6,6 +6,7 @@ public interface IEtabsAreaExportGateway : IDisposable
     void CreateNewModel(IfcEtabsUnits units);
     void SetUnits(IfcEtabsUnits units);
     void EnsureUnlocked();
+    void SetupStories(IReadOnlyList<IfcStoreyLevel> storeyLevels);
     bool MaterialExists(string materialName);
     void CreateMaterial(string materialName, EtabsMaterialKind materialKind);
     bool AreaPropertyExists(string propertyName);
@@ -13,6 +14,7 @@ public interface IEtabsAreaExportGateway : IDisposable
     void EnsureGroup(string groupName);
     string AddAreaByCoordinates(IReadOnlyList<AnalyticalPoint> boundaryPoints, string propertyName, string preferredName);
     void AssignAreaToGroup(string areaName, string groupName);
+    int AssignRigidDiaphragms();
 }
 
 public sealed class MockEtabsAreaExportGateway : IEtabsAreaExportGateway
@@ -37,6 +39,10 @@ public sealed class MockEtabsAreaExportGateway : IEtabsAreaExportGateway
     }
 
     public void EnsureUnlocked()
+    {
+    }
+
+    public void SetupStories(IReadOnlyList<IfcStoreyLevel> storeyLevels)
     {
     }
 
@@ -77,6 +83,11 @@ public sealed class MockEtabsAreaExportGateway : IEtabsAreaExportGateway
     public void AssignAreaToGroup(string areaName, string groupName)
     {
         _groups.Add(groupName);
+    }
+
+    public int AssignRigidDiaphragms()
+    {
+        return 0;
     }
 
     public void Dispose()

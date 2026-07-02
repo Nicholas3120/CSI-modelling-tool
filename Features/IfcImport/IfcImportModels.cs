@@ -71,6 +71,13 @@ public sealed class IfcImportOptions
     public bool IncludeStructuralSurfaceMembers { get; set; }
     public bool EnableAdvancedGeometryRecognition { get; set; }
     public bool RecoverMeshGeometry { get; set; } = true;
+
+    // Structural walls only: the IFC has ~17k walls with no LoadBearing flag, most of which are
+    // partitions. Use thickness as the structural proxy (structural walls here are 200-700mm,
+    // partitions are thinner) so partitions do not flood the analysis model.
+    public bool StructuralWallsOnly { get; set; } = true;
+    public double MinimumStructuralWallThickness { get; set; } = 0.140;
+
     public bool ApplyFrameConditioning { get; set; } = true;
     public double FrameConditioningMergeTolerance { get; set; } = 0.075;
     public double NodeSnapTolerance { get; set; } = 0.020;
@@ -87,6 +94,7 @@ public sealed class IfcImportResult
 {
     public List<AnalyticalFrameElement> Frames { get; set; } = [];
     public List<AnalyticalAreaElement> Areas { get; set; } = [];
+    public List<IfcStoreyLevel> StoreyLevels { get; set; } = [];
     public List<IfcImportWarning> Warnings { get; set; } = [];
     public List<SkippedIfcElement> SkippedElements { get; set; } = [];
     public List<string> CleanupActions { get; set; } = [];
@@ -101,6 +109,12 @@ public sealed class IfcImportResult
     public int ImportedAreaCount { get; set; }
     public int SkippedCount { get; set; }
     public int WarningCount { get; set; }
+}
+
+public sealed class IfcStoreyLevel
+{
+    public string Name { get; set; } = "";
+    public double Elevation { get; set; }
 }
 
 public sealed class IfcCoordinateOffsetInfo

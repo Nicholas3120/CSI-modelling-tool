@@ -33,6 +33,7 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
     private bool _resetCoordinateOrigin = true;
     private bool _connectFrames = true;
     private bool _recoverMeshGeometry = true;
+    private bool _structuralWallsOnly = true;
     private bool _exportMediumConfidenceToEtabs = true;
     private bool _useDefaultSectionForUnknown = true;
     // Default ON: a missing IFC material name must not silently drop a structural element
@@ -131,6 +132,12 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
     {
         get => _recoverMeshGeometry;
         set => SetProperty(ref _recoverMeshGeometry, value);
+    }
+
+    public bool StructuralWallsOnly
+    {
+        get => _structuralWallsOnly;
+        set => SetProperty(ref _structuralWallsOnly, value);
     }
 
     public bool ExportMediumConfidenceToEtabs
@@ -277,6 +284,7 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
             NodeSnapTolerance = NodeSnapToleranceMm / 1000.0,
             ApplyFrameConditioning = ConnectFrames,
             RecoverMeshGeometry = RecoverMeshGeometry,
+            StructuralWallsOnly = StructuralWallsOnly,
             CoordinateOriginReset = ResetCoordinateOrigin
                 ? IfcImportCoordinateOriginMode.ResetToFirstImportedPoint
                 : IfcImportCoordinateOriginMode.PreserveIfcCoordinates
@@ -492,13 +500,15 @@ public sealed class IfcStructuralImportViewModel : ObservableObject
 
         try
         {
+            bool willExportAreas = (exportSlabs || exportWalls) && exportInput.Areas.Count > 0;
             EtabsExportResult result = await RunOnStaThread(() =>
             {
+                // Diaphragms are assigned by whichever export runs last, once all joints exist.
                 EtabsExportResult frameResult = exportFrames && exportInput.Frames.Count > 0
-                    ? _etabsExporter.ExportFramesToEtabs(exportInput, options, progress)
+                    ? _etabsExporter.ExportFramesToEtabs(exportInput, options, progress, assignDiaphragms: !willExportAreas)
                     : new EtabsExportResult();
-                if ((exportSlabs || exportWalls) && exportInput.Areas.Count > 0)
-                    MergeExportResults(frameResult, _areaExporter.ExportAreasToEtabs(exportInput, options, progress));
+                if (willExportAreas)
+                    MergeExportResults(frameResult, _areaExporter.ExportAreasToEtabs(exportInput, options, progress, assignDiaphragms: true));
                 return frameResult;
             });
 
