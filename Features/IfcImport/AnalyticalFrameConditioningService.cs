@@ -18,13 +18,26 @@ public sealed class AnalyticalFrameConditioningService
     private const double MaxColumnCaptureMetres = 1.10;
     private const double DefaultCaptureMetres = 0.30;
     private const double ZeroLengthTolerance = 0.000001;
+    // A snap move is split relative to the beam's own axis: moving ALONG the axis only changes the
+    // member's length (extend/trim to reach a support) and never skews it, so it is allowed
+    // generously; moving ACROSS the axis rotates the member (skew) and is held to a tiny tolerance.
+    // This connects beams that point at a support without distorting geometry.
+    private const double MaxAxialMoveMetres = 0.600;   // extend/trim along the beam's own line
+    private const double MaxPerpMoveMetres = 0.050;    // sideways move that would skew the member
     private const double GirderEndDistanceTolerance = 0.10;   // within this of a girder end => meet at end, no split
     private const double MinimumSplitSegmentLength = 0.05;
     private const double SegmentCellSize = 1.0;
+    private const double WallCaptureMargin = 0.15;    // added to half-thickness when catching a beam at a wall face
+    private const double WallMinCapture = 0.30;       // floor on the wall capture radius
+    private const double WallZTolerance = 0.15;       // beam may sit slightly above/below the wall's z-extent
+    private const double WallCellSize = 1.0;
 
     private static readonly Regex DimensionPattern = new(@"(\d{2,5})\s*[xX]\s*(\d{2,5})", RegexOptions.Compiled);
 
-    public List<IfcImportWarning> ConditionFrames(List<AnalyticalFrameElement> frames, double mergeTolerance)
+    public List<IfcImportWarning> ConditionFrames(
+        List<AnalyticalFrameElement> frames,
+        IReadOnlyList<AnalyticalAreaElement> walls,
+        double mergeTolerance)
     {
         var warnings = new List<IfcImportWarning>();
         if (frames.Count == 0)
@@ -41,6 +54,12 @@ public sealed class AnalyticalFrameConditioningService
         if (girder.Splits.Count > 0)
             ApplyGirderSplits(frames, girder.Splits);
 
+        // Beams that frame into a wall/core: snap the still-dangling end onto the wall's plan
+        // centreline (keeping its floor elevation) so ETABS edge constraints tie it to the wall
+        // shell. Precedence is column -> girder -> wall; this pass only moves ends that are still
+        // unconnected after the first two, so it never overrides a resolved joint.
+        int wallSnapped = SnapBeamEndsToWalls(frames, walls, mergeTolerance);
+
         int merged = MergeCoincidentEndpoints(frames, mergeTolerance);
         int dangling = FlagDanglingBeamEnds(frames, columns, mergeTolerance, warnings);
 
@@ -50,10 +69,184 @@ public sealed class AnalyticalFrameConditioningService
             Category = IfcImportWarningCategory.Cleanup,
             Message = $"Frame conditioning: snapped {columnSnapped.Count} beam end(s) to columns, " +
                 $"{girder.SnappedEnds} to girders (split {girder.Splits.Count} girder(s)), " +
+                $"{wallSnapped} to walls, " +
                 $"merged {merged} joint(s), flagged {dangling} unconnected beam end(s) for review."
         });
         return warnings;
     }
+
+    private static int SnapBeamEndsToWalls(
+        List<AnalyticalFrameElement> frames,
+        IReadOnlyList<AnalyticalAreaElement> walls,
+        double mergeTolerance)
+    {
+        if (walls.Count == 0)
+            return 0;
+
+        var segments = new List<WallSegment>();
+        foreach (AnalyticalAreaElement wall in walls)
+        {
+            if (TryBuildWallSegment(wall, out WallSegment segment))
+                segments.Add(segment);
+        }
+
+        if (segments.Count == 0)
+            return 0;
+
+        var grid = new Dictionary<(long, long), List<int>>();
+        for (int i = 0; i < segments.Count; i++)
+            IndexWallSegment(grid, segments[i], i);
+
+        // A beam end is a candidate only if it is still dangling after the column/girder passes,
+        // i.e. it does not already coincide with another frame endpoint. This naturally excludes
+        // column- and girder-connected ends without tracking them by identity across girder splits.
+        double tol = double.IsFinite(mergeTolerance) && mergeTolerance > 0 ? mergeTolerance : 0.02;
+        var shared = new Dictionary<(long, long, long), int>();
+        foreach (AnalyticalFrameElement frame in frames)
+        {
+            CountEndpoint(shared, frame.StartPoint, tol);
+            CountEndpoint(shared, frame.EndPoint, tol);
+        }
+
+        int snapped = 0;
+        foreach (AnalyticalFrameElement frame in frames)
+        {
+            if (Classify(frame) != MemberKind.Beam)
+                continue;
+
+            if (TrySnapEndToWall(frame.StartPoint, frame.EndPoint, segments, grid, shared, tol))
+                snapped++;
+            if (TrySnapEndToWall(frame.EndPoint, frame.StartPoint, segments, grid, shared, tol))
+                snapped++;
+        }
+
+        return snapped;
+    }
+
+    private static bool TrySnapEndToWall(
+        AnalyticalPoint endpoint,
+        AnalyticalPoint far,
+        List<WallSegment> segments,
+        Dictionary<(long, long), List<int>> grid,
+        Dictionary<(long, long, long), int> shared,
+        double tol)
+    {
+        (long, long, long) nodeKey = (
+            (long)Math.Round(endpoint.X / tol),
+            (long)Math.Round(endpoint.Y / tol),
+            (long)Math.Round(endpoint.Z / tol));
+        if (shared.TryGetValue(nodeKey, out int count) && count > 1)
+            return false;   // already connected to another member
+
+        double bestDistance = double.PositiveInfinity;
+        double bestX = endpoint.X, bestY = endpoint.Y;
+
+        (long cx, long cy) = WallCell(endpoint.X, endpoint.Y);
+        for (long dx = -1; dx <= 1; dx++)
+        {
+            for (long dy = -1; dy <= 1; dy++)
+            {
+                if (!grid.TryGetValue((cx + dx, cy + dy), out List<int>? bucket))
+                    continue;
+
+                foreach (int index in bucket)
+                {
+                    WallSegment segment = segments[index];
+                    if (endpoint.Z < segment.ZMin - WallZTolerance || endpoint.Z > segment.ZMax + WallZTolerance)
+                        continue;
+
+                    double distance = PointToSegment2D(endpoint.X, endpoint.Y, segment, out double px, out double py);
+                    double capture = Math.Max(segment.Thickness / 2.0 + WallCaptureMargin, WallMinCapture);
+                    if (distance <= capture && distance < bestDistance)
+                    {
+                        bestDistance = distance;
+                        bestX = px;
+                        bestY = py;
+                    }
+                }
+            }
+        }
+
+        // Accept only if reaching the wall is an axial extension of the beam, not a sideways skew.
+        if (!double.IsFinite(bestDistance) || bestDistance <= ZeroLengthTolerance || !WithinSkewLimits(endpoint, far, bestX, bestY))
+            return false;
+
+        // Snap in plan only; the beam stays on its floor elevation.
+        endpoint.X = bestX;
+        endpoint.Y = bestY;
+        return true;
+    }
+
+    private static bool TryBuildWallSegment(AnalyticalAreaElement wall, out WallSegment segment)
+    {
+        segment = default;
+        List<AnalyticalPoint> points = wall.BoundaryPoints;
+        if (points.Count < 3)
+            return false;
+
+        double zMin = points.Min(point => point.Z);
+        double zMax = points.Max(point => point.Z);
+
+        // Plan run = the two most-separated boundary points in plan.
+        AnalyticalPoint anchor = points[0];
+        AnalyticalPoint end1 = points.OrderByDescending(p => PlanDistanceSquared(p, anchor)).First();
+        AnalyticalPoint end2 = points.OrderByDescending(p => PlanDistanceSquared(p, end1)).First();
+        if (PlanDistanceSquared(end1, end2) <= ZeroLengthTolerance)
+            return false;
+
+        segment = new WallSegment(end1.X, end1.Y, end2.X, end2.Y, zMin, zMax, Math.Max(wall.Thickness, 0));
+        return true;
+    }
+
+    private static void IndexWallSegment(Dictionary<(long, long), List<int>> grid, WallSegment segment, int index)
+    {
+        double length = Math.Sqrt(PlanDistanceSquared2(segment.Ax, segment.Ay, segment.Bx, segment.By));
+        int steps = Math.Max(1, (int)(length / WallCellSize) + 1);
+        var seen = new HashSet<(long, long)>();
+        for (int k = 0; k <= steps; k++)
+        {
+            double t = (double)k / steps;
+            (long, long) cell = WallCell(
+                segment.Ax + (segment.Bx - segment.Ax) * t,
+                segment.Ay + (segment.By - segment.Ay) * t);
+            if (!seen.Add(cell))
+                continue;
+
+            if (!grid.TryGetValue(cell, out List<int>? bucket))
+            {
+                bucket = [];
+                grid[cell] = bucket;
+            }
+
+            bucket.Add(index);
+        }
+    }
+
+    private static double PointToSegment2D(double x, double y, WallSegment segment, out double px, out double py)
+    {
+        double dx = segment.Bx - segment.Ax, dy = segment.By - segment.Ay;
+        double lengthSquared = dx * dx + dy * dy;
+        if (lengthSquared <= ZeroLengthTolerance)
+        {
+            px = segment.Ax;
+            py = segment.Ay;
+            return Math.Sqrt(Square(x - segment.Ax) + Square(y - segment.Ay));
+        }
+
+        double t = Math.Clamp(((x - segment.Ax) * dx + (y - segment.Ay) * dy) / lengthSquared, 0, 1);
+        px = segment.Ax + dx * t;
+        py = segment.Ay + dy * t;
+        return Math.Sqrt(Square(x - px) + Square(y - py));
+    }
+
+    private static double PlanDistanceSquared(AnalyticalPoint a, AnalyticalPoint b)
+        => Square(a.X - b.X) + Square(a.Y - b.Y);
+
+    private static double PlanDistanceSquared2(double ax, double ay, double bx, double by)
+        => Square(ax - bx) + Square(ay - by);
+
+    private static (long, long) WallCell(double x, double y)
+        => ((long)Math.Floor(x / WallCellSize), (long)Math.Floor(y / WallCellSize));
 
     private static List<ColumnLine> BuildColumnLines(List<AnalyticalFrameElement> frames)
     {
@@ -98,16 +291,16 @@ public sealed class AnalyticalFrameConditioningService
             if (Classify(frame) != MemberKind.Beam)
                 continue;
 
-            if (TrySnapEndpoint(frame.StartPoint, columns, grid))
+            if (TrySnapEndpoint(frame.StartPoint, frame.EndPoint, columns, grid))
                 snapped.Add(frame.StartPoint);
-            if (TrySnapEndpoint(frame.EndPoint, columns, grid))
+            if (TrySnapEndpoint(frame.EndPoint, frame.StartPoint, columns, grid))
                 snapped.Add(frame.EndPoint);
         }
 
         return snapped;
     }
 
-    private static bool TrySnapEndpoint(AnalyticalPoint point, List<ColumnLine> columns, Dictionary<(long, long), List<int>> grid)
+    private static bool TrySnapEndpoint(AnalyticalPoint point, AnalyticalPoint far, List<ColumnLine> columns, Dictionary<(long, long), List<int>> grid)
     {
         (long cx, long cy) = Cell(point.X, point.Y);
         double bestDistance = double.PositiveInfinity;
@@ -123,7 +316,9 @@ public sealed class AnalyticalFrameConditioningService
                 {
                     ColumnLine column = columns[index];
                     double distance = Math.Sqrt(Square(point.X - column.X) + Square(point.Y - column.Y));
-                    if (distance <= column.Capture && distance < bestDistance)
+                    // Only accept a column the beam actually points at: the move to its centreline
+                    // must be almost pure axial extension, not a sideways (skewing) shift.
+                    if (distance <= column.Capture && distance < bestDistance && WithinSkewLimits(point, far, column.X, column.Y))
                     {
                         bestDistance = distance;
                         best = column;
@@ -138,6 +333,22 @@ public sealed class AnalyticalFrameConditioningService
         point.X = best.Value.X;
         point.Y = best.Value.Y;
         return true;
+    }
+
+    // A move that is (almost) along the beam's own axis only extends/trims it — no skew. A move
+    // across the axis rotates it. Allow generous axial reach, tiny perpendicular offset.
+    private static bool WithinSkewLimits(AnalyticalPoint end, AnalyticalPoint far, double targetX, double targetY)
+    {
+        double ux = end.X - far.X, uy = end.Y - far.Y;
+        double length = Math.Sqrt(ux * ux + uy * uy);
+        if (length <= ZeroLengthTolerance)
+            return false;
+
+        ux /= length; uy /= length;
+        double mx = targetX - end.X, my = targetY - end.Y;
+        double axial = mx * ux + my * uy;          // + = extend beyond the current end
+        double perpendicular = Math.Abs(mx * -uy + my * ux);
+        return perpendicular <= MaxPerpMoveMetres && Math.Abs(axial) <= MaxAxialMoveMetres;
     }
 
     private static GirderConditioningResult SnapBeamEndsToGirders(
@@ -208,7 +419,8 @@ public sealed class AnalyticalFrameConditioningService
             }
         }
 
-        if (bestGirder == null || bestDistance <= ZeroLengthTolerance)
+        AnalyticalPoint far = ReferenceEquals(endpoint, beam.StartPoint) ? beam.EndPoint : beam.StartPoint;
+        if (bestGirder == null || bestDistance <= ZeroLengthTolerance || !WithinSkewLimits(endpoint, far, bestPoint.X, bestPoint.Y))
             return;
 
         double girderLength = Distance3D(bestGirder.StartPoint, bestGirder.EndPoint);
@@ -591,6 +803,9 @@ public sealed class AnalyticalFrameConditioningService
     }
 
     private readonly record struct ColumnLine(double X, double Y, double Capture);
+
+    // A wall reduced to its plan centreline run (A->B), vertical z-extent, and thickness.
+    private readonly record struct WallSegment(double Ax, double Ay, double Bx, double By, double ZMin, double ZMax, double Thickness);
 
     private sealed class GirderConditioningResult
     {

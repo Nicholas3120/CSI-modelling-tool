@@ -47,7 +47,17 @@ internal static class Program
             ("Slab ID matches reshaped area", SlabIdMatchesReshapedArea),
             ("Slab edge node insertion is ignored", SlabEdgeNodeInsertionIgnored),
             ("Slab redraw at same footprint matches", SlabRedrawSameFootprintMatches),
-            ("Slab opening flag change detected", SlabOpeningFlagChangeDetected)
+            ("Slab opening flag change detected", SlabOpeningFlagChangeDetected),
+            ("Relocated slab footprint backfill reported", RelocatedSlabBackfillReported),
+            ("Reshaped area matched by ID reports geometry", ReshapedAreaByIdReportsGeometry),
+            ("Material modulus rounding noise ignored", MaterialModulusNoiseIgnored),
+            ("Material modulus real change flagged", MaterialModulusRealChangeFlagged),
+            ("Joint across bucket boundary still matches", JointAcrossBucketBoundaryMatches),
+            ("Restraint table parses standard columns", RestraintTableParsesStandardColumns),
+            ("Restraint table handles aliased shuffled columns", RestraintTableHandlesAliasedColumns),
+            ("Restraint table missing DOF column falls back", RestraintTableMissingColumnFallsBack),
+            ("Restraint table parses varied boolean tokens", RestraintTableParsesVariedBooleans),
+            ("Restraint table drops all-free rows", RestraintTableDropsAllFreeRows)
         ];
 
         int failed = 0;
@@ -573,6 +583,173 @@ internal static class Program
             item => item.ObjectType == ModelCompareObjectType.Area && item.ObjectDescription.Contains("/ opening", StringComparison.OrdinalIgnoreCase));
         Equal("Slab/panel", row.OldValue, "The old area should read as a slab/panel.");
         Equal("Opening", row.NewValue, "The new area should read as an opening.");
+    }
+
+    private static void RelocatedSlabBackfillReported()
+    {
+        // Slab A1 (GUID MCT-300) relocates +10 m, and a different new slab (A2) is drawn on its old footprint.
+        // Identity matching alone would report "A1 moved" + "A2 added" with no link; the backfill fallback must
+        // connect them so the old location is not mistaken for unchanged.
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        oldSnapshot.Areas[0].Uid = "MCT-300";
+
+        ModelCompareAreaObjectSnapshot relocated = newSnapshot.Areas[0];
+        relocated.Uid = "MCT-300";
+        foreach (ModelComparePointSnapshot corner in relocated.Corners)
+            corner.X += 10;
+        newSnapshot.Areas.Add(MakeArea("A2", "AP1", 0.2, (0, 0, 0), (4, 0, 0), (4, 4, 0), (0, 4, 0)));
+
+        List<ModelCompareResultRow> areaRows = Compare(oldSnapshot, newSnapshot).Differences
+            .Where(row => row.ObjectType == ModelCompareObjectType.Area).ToList();
+        False(areaRows.Any(row => row.ChangeType == ModelCompareChangeType.Removed),
+            "The GUID-matched slab must not be reported as removed.");
+        True(areaRows.Any(row => row.ChangeType == ModelCompareChangeType.Added),
+            "The slab drawn on the old footprint should still be reported as added.");
+        ModelCompareResultRow backfill = Single(areaRows,
+            row => row.ObjectDescription.Contains("backfill", StringComparison.OrdinalIgnoreCase));
+        True(backfill.OldValue.Contains("A1", StringComparison.OrdinalIgnoreCase), "The backfill row should name the relocated slab.");
+        True(backfill.NewValue.Contains("A2", StringComparison.OrdinalIgnoreCase), "The backfill row should name the added slab.");
+    }
+
+    private static void ReshapedAreaByIdReportsGeometry()
+    {
+        // Same area ID, a corner moved, but the property assignment is unchanged. Without geometry detection
+        // this reshape would be silent. It must surface as a geometry change, matched by the persistent ID.
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        oldSnapshot.Areas[0].Uid = "MCT-slabG";
+        ModelCompareAreaObjectSnapshot reshaped = newSnapshot.Areas[0];
+        reshaped.Uid = "MCT-slabG";
+        reshaped.Corners[2] = new ModelComparePointSnapshot { X = 6, Y = 6, Z = 0 };
+
+        ModelCompareComparisonResult result = Compare(oldSnapshot, newSnapshot);
+        False(result.Differences.Any(row => row.ObjectType == ModelCompareObjectType.Area &&
+                row.ChangeType is ModelCompareChangeType.Added or ModelCompareChangeType.Removed),
+            "A reshaped area sharing an ID must not be reported as added/removed.");
+        ModelCompareResultRow row = Single(result.Differences,
+            item => item.ObjectType == ModelCompareObjectType.Area && item.ObjectDescription.Contains("/ geometry", StringComparison.OrdinalIgnoreCase));
+        Equal(ModelCompareMatchMethod.PersistentId, row.MatchMethod, "The reshaped area should be matched by its persistent ID.");
+    }
+
+    private static void MaterialModulusNoiseIgnored()
+    {
+        // A sub-MPa modulus difference (e.g. unit-conversion rounding) must not be flagged as a change.
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        newSnapshot.Materials[0].ElasticModulus = 30000.5;
+
+        False(Compare(oldSnapshot, newSnapshot).Differences.Any(row =>
+                row.ObjectType == ModelCompareObjectType.Material && row.ObjectDescription.Contains("elastic modulus", StringComparison.OrdinalIgnoreCase)),
+            "A sub-MPa modulus rounding difference must not be reported as a change.");
+    }
+
+    private static void MaterialModulusRealChangeFlagged()
+    {
+        // A real grade change (30000 -> 35000 MPa) must still be reported despite the relative tolerance.
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        newSnapshot.Materials[0].ElasticModulus = 35000;
+
+        ModelCompareResultRow row = Single(Compare(oldSnapshot, newSnapshot).Differences,
+            item => item.ObjectType == ModelCompareObjectType.Material && item.ObjectDescription.Contains("elastic modulus", StringComparison.OrdinalIgnoreCase));
+        Equal("30000", row.OldValue, "Unexpected old elastic modulus.");
+        Equal("35000", row.NewValue, "Unexpected new elastic modulus.");
+    }
+
+    private static void JointAcrossBucketBoundaryMatches()
+    {
+        // Two joints within coordinate tolerance but on opposite sides of a quantization bucket boundary must
+        // match, not be reported as one removed plus one added.
+        ModelCompareSnapshot oldSnapshot = SnapshotWithJoints(Fixed(0.0009, 0, 0));
+        ModelCompareSnapshot newSnapshot = SnapshotWithJoints(Pinned(0.0011, 0, 0));
+
+        ModelCompareComparisonResult result = Compare(oldSnapshot, newSnapshot);
+        False(result.Differences.Any(row => row.ObjectType == ModelCompareObjectType.Joint &&
+                row.ChangeType is ModelCompareChangeType.Added or ModelCompareChangeType.Removed),
+            "Joints within tolerance across a bucket boundary must not be reported as added/removed.");
+        ModelCompareResultRow row = Single(result.Differences,
+            item => item.ObjectType == ModelCompareObjectType.Joint);
+        Equal(ModelCompareChangeType.Modified, row.ChangeType, "The near-coincident joints should match and report a restraint change.");
+        Equal("Fixed", row.OldValue, "The old restraint should read as fixed.");
+        Equal("Pinned", row.NewValue, "The new restraint should read as pinned.");
+    }
+
+    private static void RestraintTableParsesStandardColumns()
+    {
+        string[] fields = ["UniqueName", "U1", "U2", "U3", "R1", "R2", "R3"];
+        string[] data = ["P1", "Yes", "Yes", "Yes", "No", "No", "No"];
+        var coords = new Dictionary<string, (double X, double Y, double Z)>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["P1"] = (1, 2, 3)
+        };
+
+        True(ModelCompareRestraintTableParser.TryParse(fields, data, 1, coords, out List<ModelCompareJointSnapshot> joints),
+            "A standard restraint table should be recognized.");
+        Equal(1, joints.Count, "Exactly one restrained joint should be parsed.");
+        ModelCompareJointSnapshot joint = joints[0];
+        Equal("P1", joint.PointName, "Unexpected joint name.");
+        True(joint.RestraintUX && joint.RestraintUY && joint.RestraintUZ, "Translational DOFs should be restrained.");
+        False(joint.RestraintRX || joint.RestraintRY || joint.RestraintRZ, "Rotational DOFs should be free.");
+        Equal(1.0, joint.X, "Joint X should come from the coordinate lookup.");
+        Equal(2.0, joint.Y, "Joint Y should come from the coordinate lookup.");
+        Equal(3.0, joint.Z, "Joint Z should come from the coordinate lookup.");
+    }
+
+    private static void RestraintTableHandlesAliasedColumns()
+    {
+        // Columns out of order and using the UX/RX aliases instead of U1/R1.
+        string[] fields = ["RZ", "Point", "UY", "UX", "UZ", "RX", "RY"];
+        string[] data = ["Yes", "B1", "Yes", "Yes", "Yes", "Yes", "Yes"];
+        var coords = new Dictionary<string, (double X, double Y, double Z)>(StringComparer.OrdinalIgnoreCase);
+
+        True(ModelCompareRestraintTableParser.TryParse(fields, data, 1, coords, out List<ModelCompareJointSnapshot> joints),
+            "Aliased, reordered columns should still be recognized.");
+        Equal(1, joints.Count, "Exactly one restrained joint should be parsed.");
+        ModelCompareJointSnapshot joint = joints[0];
+        Equal("B1", joint.PointName, "The point-name column should be resolved regardless of position.");
+        True(joint.RestraintUX && joint.RestraintUY && joint.RestraintUZ && joint.RestraintRX && joint.RestraintRY && joint.RestraintRZ,
+            "A fully fixed support should map every DOF regardless of column order.");
+    }
+
+    private static void RestraintTableMissingColumnFallsBack()
+    {
+        // No R3/RZ column: the parser must refuse (so the caller falls back to the per-point scan).
+        string[] fields = ["UniqueName", "U1", "U2", "U3", "R1", "R2"];
+        string[] data = ["P1", "Yes", "Yes", "Yes", "No", "No"];
+        var coords = new Dictionary<string, (double X, double Y, double Z)>(StringComparer.OrdinalIgnoreCase);
+
+        False(ModelCompareRestraintTableParser.TryParse(fields, data, 1, coords, out _),
+            "A table missing a DOF column must not be parsed; the caller should fall back to the scan.");
+    }
+
+    private static void RestraintTableParsesVariedBooleans()
+    {
+        string[] fields = ["Joint", "UX", "UY", "UZ", "RX", "RY", "RZ"];
+        string[] data = ["S1", "TRUE", "1", "no", "", "No", "yes"];
+        var coords = new Dictionary<string, (double X, double Y, double Z)>(StringComparer.OrdinalIgnoreCase);
+
+        True(ModelCompareRestraintTableParser.TryParse(fields, data, 1, coords, out List<ModelCompareJointSnapshot> joints),
+            "Varied boolean tokens should still parse.");
+        ModelCompareJointSnapshot joint = joints[0];
+        True(joint.RestraintUX && joint.RestraintUY && joint.RestraintRZ, "TRUE, 1 and yes should read as restrained.");
+        False(joint.RestraintUZ || joint.RestraintRX || joint.RestraintRY, "no and blank should read as free.");
+    }
+
+    private static void RestraintTableDropsAllFreeRows()
+    {
+        string[] fields = ["UniqueName", "U1", "U2", "U3", "R1", "R2", "R3"];
+        string[] data =
+        [
+            "P1", "Yes", "Yes", "Yes", "Yes", "Yes", "Yes",
+            "P2", "No", "No", "No", "No", "No", "No"
+        ];
+        var coords = new Dictionary<string, (double X, double Y, double Z)>(StringComparer.OrdinalIgnoreCase);
+
+        True(ModelCompareRestraintTableParser.TryParse(fields, data, 2, coords, out List<ModelCompareJointSnapshot> joints),
+            "A well-formed table should parse.");
+        Equal(1, joints.Count, "An all-free row should be dropped so only true supports remain.");
+        Equal("P1", joints[0].PointName, "The remaining joint should be the restrained one.");
     }
 
     private static ModelCompareSnapshot SnapshotWithJoints(params ModelCompareJointSnapshot[] joints)

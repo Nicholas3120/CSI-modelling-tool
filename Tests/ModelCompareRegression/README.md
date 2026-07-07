@@ -18,5 +18,5 @@ dotnet "Tests\ModelCompareRegression\bin\Debug\net8.0-windows\ModelCompareRegres
 Success is reported as:
 
 ```text
-10/10 Model Compare regression tests passed.
+38/38 Model Compare regression tests passed.
 ```

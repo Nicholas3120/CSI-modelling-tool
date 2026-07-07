@@ -6,7 +6,10 @@ namespace CSIModellingTools.Services;
 
 public sealed partial class EtabsParametricModellingService
 {
-    public ModelCompareSnapshotResult ExtractModelCompareSnapshot(ModelCompareSnapshotRequest request)
+    public ModelCompareSnapshotResult ExtractModelCompareSnapshot(
+        ModelCompareSnapshotRequest request,
+        IProgress<ModelCompareExtractionProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         var warnings = new List<string>();
         EtabsInstanceListResult instanceResult = ListEtabsInstances();
@@ -38,7 +41,7 @@ public sealed partial class EtabsParametricModellingService
                 SetPresentUnitsToKnMForSnapshot(sapModel);
 
                 var extractor = new EtabsSnapshotExtractor(sapModel, TryGetModelFilename(etabsObject));
-                EtabsSnapshotExtractionResult extraction = extractor.Extract();
+                EtabsSnapshotExtractionResult extraction = extractor.Extract(progress, cancellationToken);
                 warnings.AddRange(extraction.Warnings);
                 result.Snapshot = extraction.Snapshot;
                 result.IsError = false;
@@ -50,6 +53,11 @@ public sealed partial class EtabsParametricModellingService
                     TryRestorePresentUnits(sapModel, originalUnits.Value);
             }
         }
+        catch (OperationCanceledException)
+        {
+            // Let a user cancellation surface as a cancellation, not a snapshot failure.
+            throw;
+        }
         catch (Exception ex)
         {
             result.IsError = true;
@@ -59,7 +67,10 @@ public sealed partial class EtabsParametricModellingService
         return result;
     }
 
-    public ModelCompareMemberIdResult AssignFrameMemberIds(ModelCompareMemberIdRequest request)
+    public ModelCompareMemberIdResult AssignMemberIds(
+        ModelCompareMemberIdRequest request,
+        IProgress<ModelCompareExtractionProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
         var warnings = new List<string>();
 
@@ -70,65 +81,49 @@ public sealed partial class EtabsParametricModellingService
 
             TryUnlockModelForDrawing(sapModel, warnings);
 
-            int numberNames = 0;
-            string[] rawNames = [];
-            int listRet = sapModel.FrameObj.GetNameList(ref numberNames, ref rawNames);
-            if (listRet != 0)
+            int frameListRet = TryGetObjectNameList(sapModel.FrameObj.GetNameList, out List<string> frameNames);
+            if (frameListRet != 0)
             {
                 return new ModelCompareMemberIdResult
                 {
                     IsError = true,
-                    Message = $"ETABS frame list could not be read for member ID assignment. Return code: {listRet}.",
+                    Message = $"ETABS frame list could not be read for member ID assignment. Return code: {frameListRet}.",
                     Warnings = warnings
                 };
             }
 
-            List<string> frameNames = rawNames
-                .Take(Math.Min(numberNames, rawNames.Length))
-                .Where(name => !string.IsNullOrWhiteSpace(name))
-                .Select(name => name.Trim())
-                .ToList();
+            int areaListRet = TryGetObjectNameList(sapModel.AreaObj.GetNameList, out List<string> areaNames);
+            if (areaListRet != 0)
+                warnings.Add($"ETABS area list could not be read for member ID assignment (return code {areaListRet}); only frames were stamped.");
 
-            int stamped = 0;
-            int existing = 0;
-            int failed = 0;
-            foreach (string name in frameNames)
-            {
-                try
-                {
-                    string guid = "";
-                    int getRet = sapModel.FrameObj.GetGUID(name, ref guid);
-                    if (getRet == 0 && !string.IsNullOrWhiteSpace(guid))
-                    {
-                        // Keep any existing ID (tool-assigned or from a Revit/IFC import) rather than overwrite it.
-                        existing++;
-                        continue;
-                    }
-
-                    int setRet = sapModel.FrameObj.SetGUID(name, ModelCompareMemberId.Prefix + Guid.NewGuid().ToString("N"));
-                    if (setRet == 0)
-                        stamped++;
-                    else
-                        failed++;
-                }
-                catch
-                {
-                    failed++;
-                }
-            }
+            progress?.Report(new ModelCompareExtractionProgress(10, "Stamping frame IDs...", false));
+            (int frameStamped, int frameExisting, int frameFailed) = AssignGuids(
+                frameNames, sapModel.FrameObj.GetGUID, sapModel.FrameObj.SetGUID, cancellationToken);
+            progress?.Report(new ModelCompareExtractionProgress(55, "Stamping area IDs...", false));
+            (int areaStamped, int areaExisting, int areaFailed) = AssignGuids(
+                areaNames, sapModel.AreaObj.GetGUID, sapModel.AreaObj.SetGUID, cancellationToken);
 
             TryRefreshEtabsView(sapModel);
-            if (failed > 0)
-                warnings.Add($"{failed} frame(s) could not be assigned a member ID.");
+            if (frameFailed > 0)
+                warnings.Add($"{frameFailed} frame(s) could not be assigned a member ID.");
+            if (areaFailed > 0)
+                warnings.Add($"{areaFailed} area(s) could not be assigned a member ID.");
 
             return new ModelCompareMemberIdResult
             {
                 IsError = false,
-                StampedCount = stamped,
-                ExistingCount = existing,
-                Message = $"Assigned member IDs to {stamped} frame(s); {existing} already had an ID. Save the ETABS model so the IDs persist for future comparisons.",
+                StampedCount = frameStamped + areaStamped,
+                ExistingCount = frameExisting + areaExisting,
+                Message =
+                    $"Assigned member IDs to {frameStamped} frame(s) and {areaStamped} area(s); " +
+                    $"{frameExisting} frame(s) and {areaExisting} area(s) already had an ID. " +
+                    "Save the ETABS model so the IDs persist for future comparisons.",
                 Warnings = warnings
             };
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -139,6 +134,64 @@ public sealed partial class EtabsParametricModellingService
                 Warnings = warnings
             };
         }
+    }
+
+    private delegate int EtabsNameListCall(ref int number, ref string[] names);
+
+    private static int TryGetObjectNameList(EtabsNameListCall nameListCall, out List<string> names)
+    {
+        int numberNames = 0;
+        string[] rawNames = [];
+        int ret = nameListCall(ref numberNames, ref rawNames);
+        names = ret != 0
+            ? []
+            : rawNames
+                .Take(Math.Min(numberNames, rawNames.Length))
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name.Trim())
+                .ToList();
+        return ret;
+    }
+
+    private delegate int EtabsGetGuidCall(string name, ref string guid);
+    private delegate int EtabsSetGuidCall(string name, string guid);
+
+    private static (int Stamped, int Existing, int Failed) AssignGuids(
+        IReadOnlyList<string> objectNames,
+        EtabsGetGuidCall getGuid,
+        EtabsSetGuidCall setGuid,
+        CancellationToken cancellationToken)
+    {
+        int stamped = 0;
+        int existing = 0;
+        int failed = 0;
+        foreach (string name in objectNames)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                string guid = "";
+                int getRet = getGuid(name, ref guid);
+                if (getRet == 0 && !string.IsNullOrWhiteSpace(guid))
+                {
+                    // Keep any existing ID (tool-assigned or from a Revit/IFC import) rather than overwrite it.
+                    existing++;
+                    continue;
+                }
+
+                int setRet = setGuid(name, ModelCompareMemberId.Prefix + Guid.NewGuid().ToString("N"));
+                if (setRet == 0)
+                    stamped++;
+                else
+                    failed++;
+            }
+            catch
+            {
+                failed++;
+            }
+        }
+
+        return (stamped, existing, failed);
     }
 
     public ModelCompareEtabsSelectionResult SelectModelCompareObjects(ModelCompareEtabsSelectionRequest request)

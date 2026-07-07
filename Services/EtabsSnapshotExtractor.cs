@@ -1,4 +1,5 @@
 using CSIModellingTools.Models;
+using CSIModellingTools.Models.Etabs;
 using static CSIModellingTools.Services.EtabsParametricModellingService;
 
 namespace CSIModellingTools.Services;
@@ -9,6 +10,10 @@ internal sealed class EtabsSnapshotExtractor
     private const int EtabsSelectedFrameObjectType = 2;
     private const int EtabsSelectedAreaObjectType = 5;
 
+    // Flip to true to validate the bulk restraint table against the per-point scan on a known model: it reads
+    // both and warns on any difference. Leave false in normal use so the fast single-call path is used.
+    private static readonly bool RestraintTableCrossCheckEnabled = false;
+
     private readonly ETABSv1.cSapModel _sapModel;
     private readonly string _sourceModelFileName;
 
@@ -18,8 +23,11 @@ internal sealed class EtabsSnapshotExtractor
         _sourceModelFileName = sourceModelFileName ?? "";
     }
 
-    public EtabsSnapshotExtractionResult Extract()
+    public EtabsSnapshotExtractionResult Extract(
+        IProgress<ModelCompareExtractionProgress>? progress = null,
+        CancellationToken cancellationToken = default)
     {
+        Report(progress, 1, "Reading section properties...", determinate: false);
         var framePropertyWarnings = new List<string>();
         bool framePropertyNamesRead = TryGetFrameSectionNamesForSnapshot(_sapModel, framePropertyWarnings, out List<string> frameSectionNames);
         List<ModelCompareFramePropertySnapshot> frameProperties = framePropertyNamesRead
@@ -49,6 +57,8 @@ internal sealed class EtabsSnapshotExtractor
 
         // Fast path: pull all frame geometry, sections, stories, endpoints and coordinates in a single
         // GetAllFrames call. Falls back to the per-frame reads if the bulk call is unavailable.
+        cancellationToken.ThrowIfCancellationRequested();
+        Report(progress, 12, "Reading frame geometry...", determinate: false);
         Dictionary<string, string> frameLabels = TryGetFrameLabels(_sapModel);
         bool frameNamesRead = TryGetAllFramesSnapshot(
             _sapModel,
@@ -77,8 +87,10 @@ internal sealed class EtabsSnapshotExtractor
         // together in a single per-frame pass. Missing tracking IDs are stamped in-place, but only if the
         // model is already unlocked, so extraction never clears the user's analysis results.
         bool modelUnlocked = TryIsModelUnlocked(_sapModel);
-        PopulateFrameReleasesAndIds(_sapModel, frames, modelUnlocked, frameWarnings);
+        PopulateFrameReleasesAndIds(_sapModel, frames, modelUnlocked, frameWarnings, progress, cancellationToken, 15, 45);
 
+        cancellationToken.ThrowIfCancellationRequested();
+        Report(progress, 46, "Reading area properties...", determinate: false);
         var areaPropertyWarnings = new List<string>();
         bool areaPropertyNamesRead = TryGetAreaPropertyNamesForSnapshot(_sapModel, areaPropertyWarnings, out List<string> areaPropertyNames);
         List<ModelCompareAreaPropertySnapshot> areaProperties = areaPropertyNamesRead
@@ -95,10 +107,22 @@ internal sealed class EtabsSnapshotExtractor
         bool areaNamesRead = TryGetAllAreaNamesForSnapshot(_sapModel, areaWarnings, out List<string> areaNames);
         if (!areaPropertyNamesRead)
             areaWarnings.Add("Area material and thickness data are unavailable because area property definitions could not be read.");
-        List<ModelCompareAreaObjectSnapshot> areas = (areaNamesRead ? areaNames : [])
-            .Select(areaName => ReadModelCompareAreaSnapshot(_sapModel, areaName, areaPropertyByName, groupsByAreaName, pointCoordinates, areaWarnings))
-            .Where(area => area != null)
-            .Select(area => area!)
+        List<string> areaNamesToRead = areaNamesRead ? areaNames : [];
+        var readAreas = new List<ModelCompareAreaObjectSnapshot>(areaNamesToRead.Count);
+        for (int areaIndex = 0; areaIndex < areaNamesToRead.Count; areaIndex++)
+        {
+            if ((areaIndex & 63) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Report(progress, Lerp(50, 75, areaIndex, areaNamesToRead.Count), $"Reading areas ({areaIndex}/{areaNamesToRead.Count})...");
+            }
+
+            ModelCompareAreaObjectSnapshot? area = ReadModelCompareAreaSnapshot(_sapModel, areaNamesToRead[areaIndex], areaPropertyByName, groupsByAreaName, pointCoordinates, areaWarnings);
+            if (area != null)
+                readAreas.Add(area);
+        }
+
+        List<ModelCompareAreaObjectSnapshot> areas = readAreas
             .OrderBy(area => area.AreaName, StringComparer.OrdinalIgnoreCase)
             .ToList();
         bool areasRead = areaNamesRead && areas.Count == areaNames.Count;
@@ -106,8 +130,10 @@ internal sealed class EtabsSnapshotExtractor
             areaWarnings.Add($"Area extraction was marked failed because {areaNames.Count - areas.Count} of {areaNames.Count} listed ETABS areas had unreadable geometry.");
 
         // Persistent tracking IDs for areas (stamped in place only when the model is already unlocked).
-        PopulateAreaIds(_sapModel, areas, modelUnlocked, areaWarnings);
+        PopulateAreaIds(_sapModel, areas, modelUnlocked, areaWarnings, progress, cancellationToken, 75, 82);
 
+        cancellationToken.ThrowIfCancellationRequested();
+        Report(progress, 83, "Reading materials...", determinate: false);
         var materialWarnings = new List<string>();
         bool materialNamesRead = TryGetMaterialNamesForSnapshot(_sapModel, materialWarnings, out List<string> materialNames);
         List<ModelCompareMaterialSnapshot> materials = materialNamesRead
@@ -117,8 +143,22 @@ internal sealed class EtabsSnapshotExtractor
             : [];
 
         var jointWarnings = new List<string>();
-        bool jointsRead = TryGetJointSnapshots(_sapModel, pointCoordinates, jointWarnings, out List<ModelCompareJointSnapshot> joints);
+        cancellationToken.ThrowIfCancellationRequested();
+        Report(progress, 85, "Reading joint restraints...", determinate: false);
+        // Prefer the single-call restraint table (restrained joints only). Fall back to the per-point scan if
+        // the table is unavailable or its columns are not recognized, so restraint data is never guessed.
+        bool jointsRead = TryGetRestrainedJointsFromTable(_sapModel, pointCoordinates, jointWarnings, out List<ModelCompareJointSnapshot> joints);
+        if (jointsRead)
+        {
+            if (RestraintTableCrossCheckEnabled)
+                CrossCheckRestraintTableAgainstScan(_sapModel, pointCoordinates, joints, jointWarnings, cancellationToken);
+        }
+        else
+        {
+            jointsRead = TryGetJointSnapshots(_sapModel, pointCoordinates, jointWarnings, out joints, progress, cancellationToken, 85, 98);
+        }
 
+        Report(progress, 99, "Finalizing snapshot...", determinate: false);
         var extractionWarnings = new List<string>();
         extractionWarnings.AddRange(frameWarnings);
         extractionWarnings.AddRange(areaWarnings);
@@ -171,6 +211,21 @@ internal sealed class EtabsSnapshotExtractor
         };
     }
 
+    private static void Report(IProgress<ModelCompareExtractionProgress>? progress, double percent, string stage, bool determinate = true)
+    {
+        progress?.Report(new ModelCompareExtractionProgress(Math.Clamp(percent, 0, 100), stage, determinate));
+    }
+
+    // Linear interpolation of a phase's percentage band from the object index within that phase.
+    private static double Lerp(double startPercent, double endPercent, int index, int count)
+    {
+        if (count <= 0)
+            return startPercent;
+
+        double fraction = Math.Clamp((double)index / count, 0.0, 1.0);
+        return startPercent + (endPercent - startPercent) * fraction;
+    }
+
     private static ModelCompareSnapshotReadStatus BuildModelCompareReadStatus(bool readSucceeded, IReadOnlyCollection<string> warnings)
     {
         if (!readSucceeded)
@@ -198,13 +253,24 @@ internal sealed class EtabsSnapshotExtractor
         ETABSv1.cSapModel sapModel,
         IReadOnlyList<ModelCompareFrameSnapshot> frames,
         bool assignMissingIds,
-        List<string> warnings)
+        List<string> warnings,
+        IProgress<ModelCompareExtractionProgress>? progress,
+        CancellationToken cancellationToken,
+        double startPercent,
+        double endPercent)
     {
         int releaseFailureCount = 0;
         int assignedIdCount = 0;
         int missingIdCount = 0;
-        foreach (ModelCompareFrameSnapshot frame in frames)
+        for (int frameIndex = 0; frameIndex < frames.Count; frameIndex++)
         {
+            if ((frameIndex & 63) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Report(progress, Lerp(startPercent, endPercent, frameIndex, frames.Count), $"Reading frame releases and IDs ({frameIndex}/{frames.Count})...");
+            }
+
+            ModelCompareFrameSnapshot frame = frames[frameIndex];
             bool[] ii = [];
             bool[] jj = [];
             double[] startValue = [];
@@ -282,11 +348,135 @@ internal sealed class EtabsSnapshotExtractor
             warnings.Add($"{missingIdCount} frame(s) have no tracking ID (the model is locked or the ID write failed), so they are matched by geometry. Unlock the model and re-snapshot, or use Assign Member IDs, then save, to enable ID tracking.");
     }
 
-    private static bool TryGetJointSnapshots(
+    // One-call bulk read of restrained joints via the ETABS database table. Returns false (so the caller falls
+    // back to the per-point scan) whenever the table is missing or its columns are not fully recognized.
+    private static bool TryGetRestrainedJointsFromTable(
         ETABSv1.cSapModel sapModel,
         IReadOnlyDictionary<string, (double X, double Y, double Z)> pointCoordinates,
         List<string> warnings,
         out List<ModelCompareJointSnapshot> joints)
+    {
+        joints = [];
+        try
+        {
+            if (!TryFindRestraintTableKey(sapModel, out string tableKey))
+                return false;
+
+            string[] fieldKeyList = [];
+            int tableVersion = 0;
+            string[] fieldsKeysIncluded = [];
+            int numberRecords = 0;
+            string[] tableData = [];
+            int ret = sapModel.DatabaseTables.GetTableForDisplayArray(
+                tableKey,
+                ref fieldKeyList,
+                "",
+                ref tableVersion,
+                ref fieldsKeysIncluded,
+                ref numberRecords,
+                ref tableData);
+            if (ret != 0)
+                return false;
+
+            if (!ModelCompareRestraintTableParser.TryParse(fieldsKeysIncluded, tableData, numberRecords, pointCoordinates, out joints))
+            {
+                joints = [];
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            warnings.Add("Bulk restraint table read was unavailable; falling back to per-point restraint reads: " + ex.Message);
+            joints = [];
+            return false;
+        }
+    }
+
+    private static bool TryFindRestraintTableKey(ETABSv1.cSapModel sapModel, out string tableKey)
+    {
+        tableKey = "";
+        int tableCount = 0;
+        string[] tableKeys = [];
+        string[] tableNames = [];
+        int[] importTypes = [];
+        int ret = sapModel.DatabaseTables.GetAvailableTables(ref tableCount, ref tableKeys, ref tableNames, ref importTypes);
+        if (ret != 0)
+            return false;
+
+        int count = Math.Min(tableCount, Math.Min(tableKeys.Length, tableNames.Length));
+        string bestKey = "";
+        int bestScore = 0;
+        for (int index = 0; index < count; index++)
+        {
+            string key = (tableKeys[index] ?? "").Trim();
+            if (key.Length == 0)
+                continue;
+
+            string normalized = $"{key} {(tableNames[index] ?? "").Trim()}".ToUpperInvariant();
+            if (!normalized.Contains("RESTRAINT"))
+                continue;
+
+            // Prefer a joint/point restraint assignment table over any other table that mentions "restraint".
+            int score = 1;
+            if (normalized.Contains("JOINT") || normalized.Contains("POINT"))
+                score += 2;
+            if (normalized.Contains("ASSIGN"))
+                score += 1;
+            if (score > bestScore)
+            {
+                bestScore = score;
+                bestKey = key;
+            }
+        }
+
+        tableKey = bestKey;
+        return bestKey.Length > 0;
+    }
+
+    private static void CrossCheckRestraintTableAgainstScan(
+        ETABSv1.cSapModel sapModel,
+        IReadOnlyDictionary<string, (double X, double Y, double Z)> pointCoordinates,
+        IReadOnlyList<ModelCompareJointSnapshot> tableJoints,
+        List<string> warnings,
+        CancellationToken cancellationToken)
+    {
+        if (!TryGetJointSnapshots(sapModel, pointCoordinates, [], out List<ModelCompareJointSnapshot> scanJoints, null, cancellationToken, 85, 98))
+        {
+            warnings.Add("Restraint table cross-check skipped: the per-point scan was unavailable.");
+            return;
+        }
+
+        List<string> tableSignatures = tableJoints.Select(RestraintSignature).OrderBy(signature => signature, StringComparer.Ordinal).ToList();
+        List<string> scanSignatures = scanJoints.Select(RestraintSignature).OrderBy(signature => signature, StringComparer.Ordinal).ToList();
+        if (tableSignatures.SequenceEqual(scanSignatures, StringComparer.Ordinal))
+        {
+            warnings.Add($"Restraint table cross-check passed: {tableJoints.Count} restrained joint(s) match the per-point scan.");
+            return;
+        }
+
+        int tableOnly = tableSignatures.Except(scanSignatures, StringComparer.Ordinal).Count();
+        int scanOnly = scanSignatures.Except(tableSignatures, StringComparer.Ordinal).Count();
+        warnings.Add($"Restraint table cross-check MISMATCH: {tableJoints.Count} joint(s) from the table vs {scanJoints.Count} from the scan ({tableOnly} only in table, {scanOnly} only in scan). The bulk restraint read may be misparsing this ETABS version.");
+    }
+
+    private static string RestraintSignature(ModelCompareJointSnapshot joint)
+    {
+        return $"{joint.PointName.Trim()}|" +
+            $"{(joint.RestraintUX ? 1 : 0)}{(joint.RestraintUY ? 1 : 0)}{(joint.RestraintUZ ? 1 : 0)}" +
+            $"{(joint.RestraintRX ? 1 : 0)}{(joint.RestraintRY ? 1 : 0)}{(joint.RestraintRZ ? 1 : 0)}";
+    }
+
+    private static bool TryGetJointSnapshots(
+        ETABSv1.cSapModel sapModel,
+        IReadOnlyDictionary<string, (double X, double Y, double Z)> pointCoordinates,
+        List<string> warnings,
+        out List<ModelCompareJointSnapshot> joints,
+        IProgress<ModelCompareExtractionProgress>? progress,
+        CancellationToken cancellationToken,
+        double startPercent,
+        double endPercent)
     {
         joints = [];
 
@@ -324,8 +514,15 @@ internal sealed class EtabsSnapshotExtractor
 
         int failureCount = 0;
         var collected = new List<ModelCompareJointSnapshot>();
-        foreach (string pointName in pointNames)
+        for (int pointIndex = 0; pointIndex < pointNames.Count; pointIndex++)
         {
+            if ((pointIndex & 127) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Report(progress, Lerp(startPercent, endPercent, pointIndex, pointNames.Count), $"Reading joint restraints ({pointIndex}/{pointNames.Count})...");
+            }
+
+            string pointName = pointNames[pointIndex];
             bool[] restraint = [];
             try
             {
@@ -1045,12 +1242,23 @@ internal sealed class EtabsSnapshotExtractor
         ETABSv1.cSapModel sapModel,
         IReadOnlyList<ModelCompareAreaObjectSnapshot> areas,
         bool assignMissingIds,
-        List<string> warnings)
+        List<string> warnings,
+        IProgress<ModelCompareExtractionProgress>? progress,
+        CancellationToken cancellationToken,
+        double startPercent,
+        double endPercent)
     {
         int assignedIdCount = 0;
         int missingIdCount = 0;
-        foreach (ModelCompareAreaObjectSnapshot area in areas)
+        for (int areaIndex = 0; areaIndex < areas.Count; areaIndex++)
         {
+            if ((areaIndex & 63) == 0)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                Report(progress, Lerp(startPercent, endPercent, areaIndex, areas.Count), $"Assigning area IDs ({areaIndex}/{areas.Count})...");
+            }
+
+            ModelCompareAreaObjectSnapshot area = areas[areaIndex];
             try
             {
                 string guid = "";

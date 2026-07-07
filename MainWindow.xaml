@@ -4200,17 +4200,33 @@
                                 <Button Content="Assign Member IDs"
                                         Command="{Binding AssignMemberIdsCommand}"
                                         Margin="8,0,0,0"
-                                        ToolTip="Write a persistent ID into each ETABS frame that lacks one, so members can be tracked across revisions even if renamed or moved. Unlocks the model; save afterwards."/>
+                                        ToolTip="Write a persistent ID into each ETABS frame and area that lacks one, so members can be tracked across revisions even if renamed or moved. Unlocks the model; save afterwards."/>
                             </StackPanel>
                             <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="8,0,0,0">
                                 <TextBlock Text="{Binding ConnectionStatus, StringFormat=Status: {0}}"
                                            FontWeight="SemiBold"
                                            Foreground="#075985"
+                                           VerticalAlignment="Center"
                                            Margin="0,0,14,0"/>
-                                <ProgressBar Width="110"
-                                             Height="10"
-                                             IsIndeterminate="True"
+                                <ProgressBar Width="140"
+                                             Height="12"
+                                             Minimum="0"
+                                             Maximum="100"
+                                             Value="{Binding ProgressPercent, Mode=OneWay}"
+                                             IsIndeterminate="{Binding IsProgressIndeterminate}"
+                                             VerticalAlignment="Center"
                                              Visibility="{Binding BusyVisibility}"/>
+                                <TextBlock Text="{Binding ProgressText}"
+                                           Foreground="#475569"
+                                           VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"
+                                           MaxWidth="260"
+                                           Margin="8,0,0,0"
+                                           Visibility="{Binding BusyVisibility}"/>
+                                <Button Content="Cancel"
+                                        Command="{Binding CancelCommand}"
+                                        Margin="8,0,0,0"
+                                        Visibility="{Binding BusyVisibility}"/>
                             </StackPanel>
                             <TextBlock Grid.Row="1"
                                        Grid.ColumnSpan="4"

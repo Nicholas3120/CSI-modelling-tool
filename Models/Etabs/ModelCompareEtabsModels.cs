@@ -8,6 +8,10 @@ public sealed class ModelCompareSnapshotRequest
     public string? EtabsInstanceId { get; set; }
 }
 
+// Progress update for the long-running ETABS snapshot extraction. IsDeterminate is false while the stage
+// has no measurable count yet (e.g. bulk reads) so the UI can animate an indeterminate bar until counts exist.
+public readonly record struct ModelCompareExtractionProgress(double Percent, string Stage, bool IsDeterminate);
+
 [Serializable]
 public sealed class ModelCompareSnapshotResult
 {

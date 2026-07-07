@@ -7,6 +7,10 @@ public sealed class ModelCompareService
 {
     private const long MaxMovedFrameCandidateChecks = 250_000;
 
+    // Fraction of the larger magnitude used as the material-property tolerance (0.1%). Floored by the
+    // absolute MaterialPropertyTolerance so near-zero values still have a sensible minimum tolerance.
+    private const double MaterialRelativeTolerance = 0.001;
+
     public ModelCompareComparisonResult CompareSnapshots(
         ModelCompareSnapshot oldSnapshot,
         ModelCompareSnapshot newSnapshot,
@@ -356,6 +360,7 @@ public sealed class ModelCompareService
             .ToList();
         var matchedOld = new HashSet<int>();
         var matchedNew = new HashSet<int>();
+        var relocatedIdMatches = new List<RelocatedAreaMatch>();
 
         // Tier 1: persistent tracking ID. A shared area ID is the same slab even if it was reshaped or renamed.
         var newByUid = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
@@ -380,6 +385,7 @@ public sealed class ModelCompareService
             matchedNew.Add(newIndex);
             MatchAreaPair(orderedOld[oldIndex], orderedNew[newIndex], settings, comparePropertyDetails, results,
                 ModelCompareMatchMethod.PersistentId, "Matched by tool-owned area ID.");
+            RecordRelocatedIdMatch(orderedOld[oldIndex], orderedNew[newIndex], settings, relocatedIdMatches);
         }
 
         // Tier 2: normalized geometric key (quantized, collinear edge nodes dropped, order-independent).
@@ -458,7 +464,67 @@ public sealed class ModelCompareService
                 diagnostics: BuildUnmatchedDiagnostics("No area with a matching ID or stable geometry was found in the old snapshot."),
                 searchText: BuildAreaSearchText(null, newArea)));
             ApplyAreaNavigationContext(results, resultStart, null, newArea);
+            DetectAndEmitAreaBackfill(newArea, settings, relocatedIdMatches, results);
         }
+    }
+
+    // A slab matched by GUID can be reported as relocated while a different, newly added slab takes over its
+    // former footprint. Identity matching alone reports that as "slab moved" + "slab added" with no connection,
+    // which reads as if the old location changed. This surfaces the relationship explicitly so the relocation is
+    // not mistaken for an unchanged location, without hiding either the move or the addition.
+    private static void RecordRelocatedIdMatch(
+        ModelCompareAreaObjectSnapshot oldArea,
+        ModelCompareAreaObjectSnapshot newArea,
+        ModelCompareToleranceSettings settings,
+        List<RelocatedAreaMatch> relocatedIdMatches)
+    {
+        string oldKey = BuildNormalizedAreaKey(oldArea, settings.CoordinateTolerance);
+        string newKey = BuildNormalizedAreaKey(newArea, settings.CoordinateTolerance);
+        if (oldKey.Length > 0 && !string.Equals(oldKey, newKey, StringComparison.Ordinal))
+            relocatedIdMatches.Add(new RelocatedAreaMatch(oldKey, oldArea, newArea));
+    }
+
+    private static void DetectAndEmitAreaBackfill(
+        ModelCompareAreaObjectSnapshot addedArea,
+        ModelCompareToleranceSettings settings,
+        IReadOnlyList<RelocatedAreaMatch> relocatedIdMatches,
+        List<ModelCompareResultRow> results)
+    {
+        if (relocatedIdMatches.Count == 0)
+            return;
+
+        string addedKey = BuildNormalizedAreaKey(addedArea, settings.CoordinateTolerance);
+        if (addedKey.Length == 0)
+            return;
+
+        RelocatedAreaMatch? backfill = relocatedIdMatches
+            .FirstOrDefault(match => string.Equals(match.OldKey, addedKey, StringComparison.Ordinal));
+        if (backfill == null)
+            return;
+
+        string story = (addedArea.Story ?? "").Trim();
+        string location = story.Length > 0 ? $" at {story}" : "";
+        (double X, double Y, double Z) newCentroid = AreaCentroid(backfill.NewArea.Corners);
+
+        int resultStart = results.Count;
+        results.Add(BuildResult(
+            ModelCompareChangeType.Modified,
+            ModelCompareObjectType.Area,
+            $"Slab backfill{location}: an added slab sits on the former footprint of a relocated slab",
+            $"'{backfill.OldArea.AreaName}' relocated to centroid ({FormatNumber(newCentroid.X)}, {FormatNumber(newCentroid.Y)}, {FormatNumber(newCentroid.Z)})",
+            $"'{addedArea.AreaName}' added here (new object; assignments did not carry over)",
+            ModelCompareChangeImportance.Medium));
+        ApplyDiagnostics(results, resultStart, new ComparisonDiagnostics(
+            ModelCompareMatchMethod.ExactAreaGeometry,
+            ModelCompareConfidenceLevel.High,
+            1.0,
+            "A GUID-matched slab moved away and a different, newly added slab now sits on its former footprint. Reported so the relocation is not mistaken for an unchanged location.",
+            null,
+            null,
+            null,
+            null));
+        ApplySearchContext(results, resultStart, BuildAreaSearchText(backfill.OldArea, addedArea));
+        ApplyAreaNavigationContext(results, resultStart, null, addedArea);
     }
 
     private static void MatchAreaPair(
@@ -810,6 +876,23 @@ public sealed class ModelCompareService
             newArea.IsOpening ? "Opening" : "Slab/panel",
             ModelCompareChangeImportance.High);
 
+        // Reshape detection. A slab matched by persistent ID (or by same-footprint re-partition) can have its
+        // corner geometry changed without any property change, and that would otherwise go unreported. Compare
+        // the normalized corner keys, which ignore collinear edge nodes and winding, so only a genuine reshape
+        // (moved/added/removed corner) is flagged.
+        string oldGeometryKey = BuildNormalizedAreaKey(oldArea, settings.CoordinateTolerance);
+        string newGeometryKey = BuildNormalizedAreaKey(newArea, settings.CoordinateTolerance);
+        if (!string.Equals(oldGeometryKey, newGeometryKey, StringComparison.Ordinal))
+        {
+            results.Add(BuildResult(
+                ModelCompareChangeType.Modified,
+                ModelCompareObjectType.Area,
+                $"{description} / geometry",
+                DescribeAreaGeometry(oldArea),
+                DescribeAreaGeometry(newArea),
+                ModelCompareChangeImportance.High));
+        }
+
         bool propertyChanged = !string.Equals(
             (oldArea.PropertyName ?? "").Trim(),
             (newArea.PropertyName ?? "").Trim(),
@@ -1147,9 +1230,12 @@ public sealed class ModelCompareService
             string description = $"Material '{name}'";
 
             AddStringDifference(results, ModelCompareObjectType.Material, $"{description} / type", oldMaterial.MaterialType, newMaterial.MaterialType, ModelCompareChangeImportance.High);
-            AddNumericDifference(results, ModelCompareObjectType.Material, $"{description} / elastic modulus", oldMaterial.ElasticModulus, newMaterial.ElasticModulus, settings.MaterialPropertyTolerance, ModelCompareChangeImportance.High);
+            // Elastic modulus and unit weight are large numbers (E in MPa is ~30000), so an absolute tolerance
+            // of a few thousandths flags unit-conversion rounding as a change. A relative tolerance, floored by
+            // the absolute setting, ignores that noise while still catching a real grade change.
+            AddRelativeNumericDifference(results, ModelCompareObjectType.Material, $"{description} / elastic modulus", oldMaterial.ElasticModulus, newMaterial.ElasticModulus, settings.MaterialPropertyTolerance, MaterialRelativeTolerance, ModelCompareChangeImportance.High);
             AddNumericDifference(results, ModelCompareObjectType.Material, $"{description} / Poisson ratio", oldMaterial.PoissonRatio, newMaterial.PoissonRatio, settings.MaterialPropertyTolerance, ModelCompareChangeImportance.Medium);
-            AddNumericDifference(results, ModelCompareObjectType.Material, $"{description} / unit weight", oldMaterial.UnitWeight, newMaterial.UnitWeight, settings.MaterialPropertyTolerance, ModelCompareChangeImportance.Medium);
+            AddRelativeNumericDifference(results, ModelCompareObjectType.Material, $"{description} / unit weight", oldMaterial.UnitWeight, newMaterial.UnitWeight, settings.MaterialPropertyTolerance, MaterialRelativeTolerance, ModelCompareChangeImportance.Medium);
         }
     }
 
@@ -1159,35 +1245,30 @@ public sealed class ModelCompareService
         ModelCompareToleranceSettings settings,
         List<ModelCompareResultRow> results)
     {
-        Dictionary<string, Queue<ModelCompareJointSnapshot>> oldByKey = BuildJointLookup(oldJoints, settings.CoordinateTolerance);
-        Dictionary<string, Queue<ModelCompareJointSnapshot>> newByKey = BuildJointLookup(newJoints, settings.CoordinateTolerance);
-        var allKeys = new SortedSet<string>(oldByKey.Keys, StringComparer.Ordinal);
-        allKeys.UnionWith(newByKey.Keys);
+        List<ModelCompareJointSnapshot> orderedOld = oldJoints
+            .OrderBy(joint => joint.PointName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        List<ModelCompareJointSnapshot> orderedNew = newJoints
+            .OrderBy(joint => joint.PointName, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
-        foreach (string key in allKeys)
+        // Bucket new joints by quantized coordinate so a joint that sits just across a grid boundary from its
+        // counterpart is still found (matching by exact bucket key would report both as removed + added).
+        var newByBucket = new Dictionary<FramePointBucket, List<int>>();
+        for (int index = 0; index < orderedNew.Count; index++)
         {
-            oldByKey.TryGetValue(key, out Queue<ModelCompareJointSnapshot>? oldQueue);
-            newByKey.TryGetValue(key, out Queue<ModelCompareJointSnapshot>? newQueue);
+            ModelCompareJointSnapshot joint = orderedNew[index];
+            FramePointBucket bucket = BuildFramePointBucket(joint.X, joint.Y, joint.Z, settings.CoordinateTolerance);
+            AddFrameEndpointIndex(newByBucket, bucket, index);
+        }
 
-            while ((oldQueue?.Count ?? 0) > 0 && (newQueue?.Count ?? 0) > 0)
+        var matchedNew = new bool[orderedNew.Count];
+        foreach (ModelCompareJointSnapshot oldJoint in orderedOld)
+        {
+            int bestIndex = FindNearestJointMatch(oldJoint, orderedNew, newByBucket, matchedNew, settings.CoordinateTolerance);
+            if (bestIndex < 0)
             {
-                ModelCompareJointSnapshot oldJoint = oldQueue!.Dequeue();
-                ModelCompareJointSnapshot newJoint = newQueue!.Dequeue();
-                int resultStart = results.Count;
-                AddStringDifference(
-                    results,
-                    ModelCompareObjectType.Joint,
-                    $"{DescribeJoint(newJoint)} / restraint",
-                    DescribeRestraint(oldJoint),
-                    DescribeRestraint(newJoint),
-                    ModelCompareChangeImportance.High);
-                ApplyJointNavigationContext(results, resultStart, oldJoint, newJoint);
-            }
-
-            while ((oldQueue?.Count ?? 0) > 0)
-            {
-                ModelCompareJointSnapshot oldJoint = oldQueue!.Dequeue();
-                int resultStart = results.Count;
+                int removedStart = results.Count;
                 results.Add(BuildResult(
                     ModelCompareChangeType.Removed,
                     ModelCompareObjectType.Joint,
@@ -1195,44 +1276,83 @@ public sealed class ModelCompareService
                     DescribeRestraint(oldJoint),
                     "",
                     ModelCompareChangeImportance.High));
-                ApplyJointNavigationContext(results, resultStart, oldJoint, null);
+                ApplyJointNavigationContext(results, removedStart, oldJoint, null);
+                continue;
             }
 
-            while ((newQueue?.Count ?? 0) > 0)
-            {
-                ModelCompareJointSnapshot newJoint = newQueue!.Dequeue();
-                int resultStart = results.Count;
-                results.Add(BuildResult(
-                    ModelCompareChangeType.Added,
-                    ModelCompareObjectType.Joint,
-                    DescribeJoint(newJoint),
-                    "",
-                    DescribeRestraint(newJoint),
-                    ModelCompareChangeImportance.High));
-                ApplyJointNavigationContext(results, resultStart, null, newJoint);
-            }
+            matchedNew[bestIndex] = true;
+            ModelCompareJointSnapshot newJoint = orderedNew[bestIndex];
+            int resultStart = results.Count;
+            AddStringDifference(
+                results,
+                ModelCompareObjectType.Joint,
+                $"{DescribeJoint(newJoint)} / restraint",
+                DescribeRestraint(oldJoint),
+                DescribeRestraint(newJoint),
+                ModelCompareChangeImportance.High);
+            ApplyJointNavigationContext(results, resultStart, oldJoint, newJoint);
+        }
+
+        for (int index = 0; index < orderedNew.Count; index++)
+        {
+            if (matchedNew[index])
+                continue;
+
+            ModelCompareJointSnapshot newJoint = orderedNew[index];
+            int addedStart = results.Count;
+            results.Add(BuildResult(
+                ModelCompareChangeType.Added,
+                ModelCompareObjectType.Joint,
+                DescribeJoint(newJoint),
+                "",
+                DescribeRestraint(newJoint),
+                ModelCompareChangeImportance.High));
+            ApplyJointNavigationContext(results, addedStart, null, newJoint);
         }
     }
 
-    private static Dictionary<string, Queue<ModelCompareJointSnapshot>> BuildJointLookup(
-        IEnumerable<ModelCompareJointSnapshot> joints,
+    private static int FindNearestJointMatch(
+        ModelCompareJointSnapshot oldJoint,
+        IReadOnlyList<ModelCompareJointSnapshot> newJoints,
+        IReadOnlyDictionary<FramePointBucket, List<int>> newByBucket,
+        bool[] matchedNew,
         double coordinateTolerance)
     {
-        var lookup = new Dictionary<string, Queue<ModelCompareJointSnapshot>>(StringComparer.Ordinal);
+        FramePointBucket oldBucket = BuildFramePointBucket(oldJoint.X, oldJoint.Y, oldJoint.Z, coordinateTolerance);
+        int bestIndex = -1;
+        double bestDistance = double.MaxValue;
 
-        foreach (ModelCompareJointSnapshot joint in joints.OrderBy(joint => joint.PointName, StringComparer.OrdinalIgnoreCase))
+        for (long xOffset = -1; xOffset <= 1; xOffset++)
         {
-            string key = BuildPointCoordinateKey(joint.X, joint.Y, joint.Z, coordinateTolerance);
-            if (!lookup.TryGetValue(key, out Queue<ModelCompareJointSnapshot>? queue))
+            for (long yOffset = -1; yOffset <= 1; yOffset++)
             {
-                queue = new Queue<ModelCompareJointSnapshot>();
-                lookup[key] = queue;
-            }
+                for (long zOffset = -1; zOffset <= 1; zOffset++)
+                {
+                    var bucket = new FramePointBucket(oldBucket.X + xOffset, oldBucket.Y + yOffset, oldBucket.Z + zOffset);
+                    if (!newByBucket.TryGetValue(bucket, out List<int>? indexes))
+                        continue;
 
-            queue.Enqueue(joint);
+                    foreach (int index in indexes)
+                    {
+                        if (matchedNew[index])
+                            continue;
+
+                        ModelCompareJointSnapshot candidate = newJoints[index];
+                        if (!PointsMatch(oldJoint.X, oldJoint.Y, oldJoint.Z, candidate.X, candidate.Y, candidate.Z, coordinateTolerance))
+                            continue;
+
+                        double distance = CalculateDistance(oldJoint.X, oldJoint.Y, oldJoint.Z, candidate.X, candidate.Y, candidate.Z);
+                        if (distance < bestDistance)
+                        {
+                            bestDistance = distance;
+                            bestIndex = index;
+                        }
+                    }
+                }
+            }
         }
 
-        return lookup;
+        return bestIndex;
     }
 
     private static void ApplyJointNavigationContext(
@@ -1553,6 +1673,33 @@ public sealed class ModelCompareService
             importance));
     }
 
+    private static void AddRelativeNumericDifference(
+        List<ModelCompareResultRow> results,
+        ModelCompareObjectType objectType,
+        string description,
+        double oldValue,
+        double newValue,
+        double absoluteFloor,
+        double relativeFraction,
+        ModelCompareChangeImportance importance)
+    {
+        if (!double.IsFinite(oldValue) && !double.IsFinite(newValue))
+            return;
+
+        double magnitude = Math.Max(Math.Abs(oldValue), Math.Abs(newValue));
+        double tolerance = Math.Max(absoluteFloor, magnitude * relativeFraction);
+        if (Math.Abs(oldValue - newValue) <= tolerance)
+            return;
+
+        results.Add(BuildResult(
+            ModelCompareChangeType.Modified,
+            objectType,
+            description,
+            FormatNumber(oldValue),
+            FormatNumber(newValue),
+            importance));
+    }
+
     private static ComparisonDiagnostics BuildFrameDiagnostics(
         ModelCompareFrameSnapshot oldFrame,
         ModelCompareFrameSnapshot newFrame,
@@ -1778,6 +1925,13 @@ public sealed class ModelCompareService
             : $"Area '{area.AreaName}'";
     }
 
+    private static string DescribeAreaGeometry(ModelCompareAreaObjectSnapshot area)
+    {
+        (double X, double Y, double Z) centroid = AreaCentroid(area.Corners);
+        return $"{area.Corners.Count} corner(s), area={FormatNumber(AreaPlanarArea(area))} m^2, " +
+            $"centroid=({FormatNumber(centroid.X)}, {FormatNumber(centroid.Y)}, {FormatNumber(centroid.Z)})";
+    }
+
     private static string FormatFrameLocation(ModelCompareFrameSnapshot frame)
     {
         return $"({FormatNumber(frame.IX)}, {FormatNumber(frame.IY)}, {FormatNumber(frame.IZ)}) to ({FormatNumber(frame.JX)}, {FormatNumber(frame.JY)}, {FormatNumber(frame.JZ)})";
@@ -1842,6 +1996,11 @@ public sealed class ModelCompareService
         bool SameSection);
 
     private readonly record struct FramePointBucket(long X, long Y, long Z);
+
+    private sealed record RelocatedAreaMatch(
+        string OldKey,
+        ModelCompareAreaObjectSnapshot OldArea,
+        ModelCompareAreaObjectSnapshot NewArea);
 
     private sealed record ComparisonDiagnostics(
         ModelCompareMatchMethod MatchMethod,

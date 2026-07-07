@@ -1,6 +1,8 @@
 using System.Collections;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Threading;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Input;
@@ -37,6 +39,11 @@ public sealed class ModelCompareViewModel : ObservableObject
     private string _selectedStoryFilter = "All";
     private bool _hideReviewedAndIgnored;
     private string _resultSearchText = "";
+    private CancellationTokenSource? _cts;
+    private bool _cancellable;
+    private double _progressPercent;
+    private string _progressText = "";
+    private bool _isProgressDeterminate;
 
     public ModelCompareViewModel()
     {
@@ -45,6 +52,7 @@ public sealed class ModelCompareViewModel : ObservableObject
         RefreshEtabsInstancesCommand = new RelayCommand(_ => RefreshEtabsInstances(), _ => !IsBusy);
         CreateEtabsSnapshotCommand = new RelayCommand(_ => CreateEtabsSnapshot(), _ => !IsBusy);
         AssignMemberIdsCommand = new RelayCommand(_ => AssignMemberIds(), _ => !IsBusy);
+        CancelCommand = new RelayCommand(_ => CancelOperation(), _ => IsBusy && _cancellable && _cts is { IsCancellationRequested: false });
         BrowseOldSnapshotCommand = new RelayCommand(_ => BrowseOldSnapshot(), _ => !IsBusy);
         BrowseNewSnapshotCommand = new RelayCommand(_ => BrowseNewSnapshot(), _ => !IsBusy);
         LoadOldSnapshotCommand = new RelayCommand(_ => LoadOldSnapshot(), _ => !IsBusy);
@@ -70,6 +78,7 @@ public sealed class ModelCompareViewModel : ObservableObject
     public ICommand RefreshEtabsInstancesCommand { get; }
     public ICommand CreateEtabsSnapshotCommand { get; }
     public ICommand AssignMemberIdsCommand { get; }
+    public ICommand CancelCommand { get; }
     public ICommand BrowseOldSnapshotCommand { get; }
     public ICommand BrowseNewSnapshotCommand { get; }
     public ICommand LoadOldSnapshotCommand { get; }
@@ -144,11 +153,30 @@ public sealed class ModelCompareViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _isBusy, value))
+            {
                 OnPropertyChanged(nameof(BusyVisibility));
+                OnPropertyChanged(nameof(IsProgressIndeterminate));
+            }
         }
     }
 
     public Visibility BusyVisibility => IsBusy ? Visibility.Visible : Visibility.Collapsed;
+
+    public double ProgressPercent
+    {
+        get => _progressPercent;
+        private set => SetProperty(ref _progressPercent, value);
+    }
+
+    public string ProgressText
+    {
+        get => _progressText;
+        private set => SetProperty(ref _progressText, value);
+    }
+
+    // The bar animates as indeterminate until an object count is known (bulk reads), then switches to a
+    // determinate percentage once the per-object passes start reporting.
+    public bool IsProgressIndeterminate => IsBusy && !_isProgressDeterminate;
 
     public double CoordinateToleranceMm
     {
@@ -287,10 +315,13 @@ public sealed class ModelCompareViewModel : ObservableObject
             row.ObjectDescription.Contains("/ material", StringComparison.OrdinalIgnoreCase) ||
             row.ObjectDescription.Contains("/ thickness", StringComparison.OrdinalIgnoreCase)));
 
-    private void AssignMemberIds()
+    private async void AssignMemberIds()
     {
+        if (IsBusy)
+            return;
+
         MessageBoxResult confirmation = MessageBox.Show(
-            "This assigns a persistent member ID to every frame in the selected ETABS model that does not already have one.\n\n" +
+            "This assigns a persistent member ID to every frame and area in the selected ETABS model that does not already have one.\n\n" +
             "The model will be unlocked (which clears any existing analysis results), and you should save the model afterwards so the IDs persist for future comparisons.\n\n" +
             "Continue?",
             "Assign member IDs",
@@ -299,37 +330,44 @@ public sealed class ModelCompareViewModel : ObservableObject
         if (confirmation != MessageBoxResult.Yes)
             return;
 
-        RunCommand("Assigning member IDs in ETABS...", () =>
+        string instanceId = SelectedEtabsInstanceId;
+        await RunEtabsAsync("Assigning member IDs in ETABS...", cancellable: true, (progress, token) =>
         {
-            ModelCompareMemberIdResult result = _etabsService.AssignFrameMemberIds(new ModelCompareMemberIdRequest
-            {
-                EtabsInstanceId = SelectedEtabsInstanceId
-            });
-            ShowMessages(
+            ModelCompareMemberIdResult result = _etabsService.AssignMemberIds(
+                new ModelCompareMemberIdRequest { EtabsInstanceId = instanceId },
+                progress,
+                token);
+            return () => ShowMessages(
                 result.Warnings,
                 result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info,
                 result.Message);
         });
     }
 
-    private void RefreshEtabsInstances()
+    private async void RefreshEtabsInstances()
     {
-        RunCommand("Refreshing ETABS instances...", () =>
+        string previousId = SelectedEtabsInstanceId;
+        await RunEtabsAsync("Refreshing ETABS instances...", cancellable: false, (_, _) =>
         {
             EtabsInstanceListResult result = _etabsService.ListEtabsInstances();
-            string previousId = SelectedEtabsInstanceId;
-            ReplaceCollection(EtabsInstances, result.Instances);
-            SelectedEtabsInstance = EtabsInstances.FirstOrDefault(instance =>
-                string.Equals(instance.Id, previousId, StringComparison.OrdinalIgnoreCase)) ??
-                EtabsInstances.FirstOrDefault();
+            return () =>
+            {
+                ReplaceCollection(EtabsInstances, result.Instances);
+                SelectedEtabsInstance = EtabsInstances.FirstOrDefault(instance =>
+                    string.Equals(instance.Id, previousId, StringComparison.OrdinalIgnoreCase)) ??
+                    EtabsInstances.FirstOrDefault();
 
-            ConnectionStatus = result.Message;
-            ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
+                ConnectionStatus = result.Message;
+                ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
+            };
         });
     }
 
-    private void CreateEtabsSnapshot()
+    private async void CreateEtabsSnapshot()
     {
+        if (IsBusy)
+            return;
+
         var dialog = new SaveFileDialog
         {
             Title = "Save ETABS Model Snapshot",
@@ -342,31 +380,40 @@ public sealed class ModelCompareViewModel : ObservableObject
         if (dialog.ShowDialog() != true)
             return;
 
-        RunCommand("Creating ETABS model snapshot...", () =>
+        string fileName = dialog.FileName;
+        string instanceId = SelectedEtabsInstanceId;
+
+        await RunEtabsAsync("Creating ETABS model snapshot...", cancellable: true, (progress, token) =>
         {
-            ModelCompareSnapshotResult snapshotResult = _etabsService.ExtractModelCompareSnapshot(new ModelCompareSnapshotRequest
-            {
-                EtabsInstanceId = SelectedEtabsInstanceId
-            });
+            ModelCompareSnapshotResult snapshotResult = _etabsService.ExtractModelCompareSnapshot(
+                new ModelCompareSnapshotRequest { EtabsInstanceId = instanceId },
+                progress,
+                token);
 
             if (snapshotResult.Snapshot == null || snapshotResult.IsError)
             {
-                ConnectionStatus = "Snapshot failed";
-                ShowMessages(snapshotResult.Warnings, ValidationSeverity.Critical, snapshotResult.Message);
-                return;
+                return () =>
+                {
+                    ConnectionStatus = "Snapshot failed";
+                    ShowMessages(snapshotResult.Warnings, ValidationSeverity.Critical, snapshotResult.Message);
+                };
             }
 
-            ModelCompareSnapshotSaveResult saveResult = _jsonService.SaveSnapshot(snapshotResult.Snapshot, dialog.FileName);
-            if (!saveResult.IsError)
+            // Writing the JSON is part of the background work so a large snapshot does not block the UI thread.
+            ModelCompareSnapshotSaveResult saveResult = _jsonService.SaveSnapshot(snapshotResult.Snapshot, fileName);
+            return () =>
             {
-                NewSnapshotPath = saveResult.FilePath;
-                _newSnapshot = snapshotResult.Snapshot;
-                OnPropertyChanged(nameof(NewSnapshotSummary));
-            }
+                if (!saveResult.IsError)
+                {
+                    NewSnapshotPath = saveResult.FilePath;
+                    _newSnapshot = snapshotResult.Snapshot;
+                    OnPropertyChanged(nameof(NewSnapshotSummary));
+                }
 
-            ConnectionStatus = "Connected";
-            string message = saveResult.IsError ? saveResult.Message : $"{snapshotResult.Message} {saveResult.Message}";
-            ShowMessages(snapshotResult.Warnings, saveResult.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, message);
+                ConnectionStatus = "Connected";
+                string message = saveResult.IsError ? saveResult.Message : $"{snapshotResult.Message} {saveResult.Message}";
+                ShowMessages(snapshotResult.Warnings, saveResult.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, message);
+            };
         });
     }
 
@@ -468,90 +515,99 @@ public sealed class ModelCompareViewModel : ObservableObject
         SelectResultsInEtabs(rows);
     }
 
-    private void SelectResultsInEtabs(IReadOnlyList<ModelCompareResultRowViewModel> rows)
+    private async void SelectResultsInEtabs(IReadOnlyList<ModelCompareResultRowViewModel> rows)
     {
-        RunCommand("Selecting comparison objects in ETABS...", () =>
+        if (IsBusy)
+            return;
+
+        // Resolve the object targets on the UI thread (reading the row view models), then hand the ETABS COM
+        // selection off to a background STA thread.
+        var warnings = new List<string>();
+        var targetsByKey = new Dictionary<string, ModelCompareEtabsSelectionTarget>(StringComparer.OrdinalIgnoreCase);
+        var locationsByKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        int unsupportedCount = 0;
+        int unnamedCount = 0;
+
+        foreach (ModelCompareResultRowViewModel row in rows)
         {
-            var warnings = new List<string>();
-            var targetsByKey = new Dictionary<string, ModelCompareEtabsSelectionTarget>(StringComparer.OrdinalIgnoreCase);
-            var locationsByKey = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            int unsupportedCount = 0;
-            int unnamedCount = 0;
-
-            foreach (ModelCompareResultRowViewModel row in rows)
+            if (row.ObjectType is not (ModelCompareObjectType.Frame or ModelCompareObjectType.Area or ModelCompareObjectType.Joint))
             {
-                if (row.ObjectType is not (ModelCompareObjectType.Frame or ModelCompareObjectType.Area or ModelCompareObjectType.Joint))
-                {
-                    unsupportedCount++;
-                    continue;
-                }
-
-                bool useOldObject = row.ChangeType == ModelCompareChangeType.Removed;
-                string objectName = (useOldObject ? row.OldEtabsObjectName : row.NewEtabsObjectName).Trim();
-                string location = useOldObject ? row.OldObjectLocation : row.NewObjectLocation;
-                if (objectName.Length == 0)
-                {
-                    unnamedCount++;
-                    if (unnamedCount <= MaxNavigationDetailMessages)
-                    {
-                        warnings.Add($"{row.ObjectType} result '{row.ObjectDescription}' has no reliable ETABS object name; no selection was attempted.{FormatSnapshotCoordinatesMessage(location)}");
-                    }
-                    continue;
-                }
-
-                string key = BuildEtabsSelectionKey(row.ObjectType, objectName);
-                if (!targetsByKey.ContainsKey(key))
-                {
-                    targetsByKey[key] = new ModelCompareEtabsSelectionTarget
-                    {
-                        ObjectType = row.ObjectType,
-                        ObjectName = objectName
-                    };
-                    locationsByKey[key] = location;
-                }
+                unsupportedCount++;
+                continue;
             }
 
-            if (unsupportedCount > 0)
-                warnings.Add($"Ignored {unsupportedCount} selected property-definition row(s); only frame and area object rows can be selected in ETABS.");
-            if (unnamedCount > MaxNavigationDetailMessages)
-                warnings.Add($"{unnamedCount - MaxNavigationDetailMessages} additional frame/area row(s) had no reliable ETABS object name.");
-
-            List<ModelCompareEtabsSelectionTarget> targets = targetsByKey.Values.ToList();
-            if (targets.Count == 0)
+            bool useOldObject = row.ChangeType == ModelCompareChangeType.Removed;
+            string objectName = (useOldObject ? row.OldEtabsObjectName : row.NewEtabsObjectName).Trim();
+            string location = useOldObject ? row.OldObjectLocation : row.NewObjectLocation;
+            if (objectName.Length == 0)
             {
-                ShowMessages(warnings, ValidationSeverity.Warning, "No selectable ETABS frame or area objects were found in the highlighted rows.");
-                return;
+                unnamedCount++;
+                if (unnamedCount <= MaxNavigationDetailMessages)
+                {
+                    warnings.Add($"{row.ObjectType} result '{row.ObjectDescription}' has no reliable ETABS object name; no selection was attempted.{FormatSnapshotCoordinatesMessage(location)}");
+                }
+                continue;
             }
 
-            if (targets.Count > ModelCompareEtabsSelectionLimits.MaxObjects)
+            string key = BuildEtabsSelectionKey(row.ObjectType, objectName);
+            if (!targetsByKey.ContainsKey(key))
             {
-                ShowMessages(
-                    warnings,
-                    ValidationSeverity.Warning,
-                    $"Selection was not attempted because {targets.Count} unique objects exceed the safety limit of {ModelCompareEtabsSelectionLimits.MaxObjects}. Filter the table or select fewer rows.");
-                return;
+                targetsByKey[key] = new ModelCompareEtabsSelectionTarget
+                {
+                    ObjectType = row.ObjectType,
+                    ObjectName = objectName
+                };
+                locationsByKey[key] = location;
             }
+        }
 
+        if (unsupportedCount > 0)
+            warnings.Add($"Ignored {unsupportedCount} selected property-definition row(s); only frame and area object rows can be selected in ETABS.");
+        if (unnamedCount > MaxNavigationDetailMessages)
+            warnings.Add($"{unnamedCount - MaxNavigationDetailMessages} additional frame/area row(s) had no reliable ETABS object name.");
+
+        List<ModelCompareEtabsSelectionTarget> targets = targetsByKey.Values.ToList();
+        if (targets.Count == 0)
+        {
+            ShowMessages(warnings, ValidationSeverity.Warning, "No selectable ETABS frame or area objects were found in the highlighted rows.");
+            return;
+        }
+
+        if (targets.Count > ModelCompareEtabsSelectionLimits.MaxObjects)
+        {
+            ShowMessages(
+                warnings,
+                ValidationSeverity.Warning,
+                $"Selection was not attempted because {targets.Count} unique objects exceed the safety limit of {ModelCompareEtabsSelectionLimits.MaxObjects}. Filter the table or select fewer rows.");
+            return;
+        }
+
+        string instanceId = SelectedEtabsInstanceId;
+        await RunEtabsAsync("Selecting comparison objects in ETABS...", cancellable: false, (_, _) =>
+        {
             ModelCompareEtabsSelectionResult result = _etabsService.SelectModelCompareObjects(
                 new ModelCompareEtabsSelectionRequest
                 {
-                    EtabsInstanceId = SelectedEtabsInstanceId,
+                    EtabsInstanceId = instanceId,
                     Targets = targets
                 });
 
-            foreach (ModelCompareEtabsSelectionFailure failure in result.Failures.Take(MaxNavigationDetailMessages))
+            return () =>
             {
-                string key = BuildEtabsSelectionKey(failure.ObjectType, failure.ObjectName);
-                locationsByKey.TryGetValue(key, out string? location);
-                warnings.Add($"{failure.ObjectType} '{failure.ObjectName}': {failure.Reason}{FormatSnapshotCoordinatesMessage(location ?? "")}");
-            }
-            if (result.Failures.Count > MaxNavigationDetailMessages)
-                warnings.Add($"{result.Failures.Count - MaxNavigationDetailMessages} additional ETABS object(s) were skipped.");
+                foreach (ModelCompareEtabsSelectionFailure failure in result.Failures.Take(MaxNavigationDetailMessages))
+                {
+                    string key = BuildEtabsSelectionKey(failure.ObjectType, failure.ObjectName);
+                    locationsByKey.TryGetValue(key, out string? location);
+                    warnings.Add($"{failure.ObjectType} '{failure.ObjectName}': {failure.Reason}{FormatSnapshotCoordinatesMessage(location ?? "")}");
+                }
+                if (result.Failures.Count > MaxNavigationDetailMessages)
+                    warnings.Add($"{result.Failures.Count - MaxNavigationDetailMessages} additional ETABS object(s) were skipped.");
 
-            ShowMessages(
-                warnings,
-                result.IsError ? ValidationSeverity.Warning : ValidationSeverity.Info,
-                result.Message);
+                ShowMessages(
+                    warnings,
+                    result.IsError ? ValidationSeverity.Warning : ValidationSeverity.Info,
+                    result.Message);
+            };
         });
     }
 
@@ -610,6 +666,112 @@ public sealed class ModelCompareViewModel : ObservableObject
             Mouse.OverrideCursor = null;
             CommandManager.InvalidateRequerySuggested();
         }
+    }
+
+    // Runs an ETABS COM operation on a dedicated STA background thread so the window stays responsive and the
+    // progress bar animates. The work returns an Action that applies its results (collection updates, messages)
+    // back on the UI thread once the background work completes.
+    private async Task RunEtabsAsync(
+        string busyMessage,
+        bool cancellable,
+        Func<IProgress<ModelCompareExtractionProgress>, CancellationToken, Action> work)
+    {
+        if (IsBusy)
+            return;
+
+        var cts = new CancellationTokenSource();
+        _cts = cts;
+        _cancellable = cancellable;
+        var progress = new Progress<ModelCompareExtractionProgress>(OnExtractionProgress);
+
+        IsBusy = true;
+        ResetProgress(busyMessage);
+        OperationStatus = busyMessage;
+        CommandManager.InvalidateRequerySuggested();
+
+        try
+        {
+            Action applyResult = await RunOnStaThread(() => work(progress, cts.Token));
+            applyResult();
+            if (string.Equals(OperationStatus, busyMessage, StringComparison.Ordinal))
+                OperationStatus = Messages.Any(message => message.IsCritical) ? "Failed." : "Done.";
+        }
+        catch (OperationCanceledException)
+        {
+            OperationStatus = "Cancelled.";
+            ShowMessages([], ValidationSeverity.Warning, "Operation cancelled before it finished. Any tracking IDs already written to the ETABS model remain; save the model if you want to keep them.");
+        }
+        catch (Exception ex)
+        {
+            OperationStatus = $"Failed: {ex.Message}";
+            ShowMessages([], ValidationSeverity.Critical, ex.Message);
+        }
+        finally
+        {
+            IsBusy = false;
+            _cancellable = false;
+            _cts = null;
+            cts.Dispose();
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    private void CancelOperation()
+    {
+        if (_cts is { IsCancellationRequested: false })
+        {
+            _cts.Cancel();
+            OperationStatus = "Cancelling...";
+            ProgressText = "Cancelling...";
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    private void OnExtractionProgress(ModelCompareExtractionProgress update)
+    {
+        if (_isProgressDeterminate != update.IsDeterminate)
+        {
+            _isProgressDeterminate = update.IsDeterminate;
+            OnPropertyChanged(nameof(IsProgressIndeterminate));
+        }
+
+        ProgressPercent = update.IsDeterminate ? update.Percent : 0;
+        ProgressText = update.IsDeterminate ? $"{update.Percent:0}% — {update.Stage}" : update.Stage;
+    }
+
+    private void ResetProgress(string text)
+    {
+        ProgressPercent = 0;
+        ProgressText = text;
+        if (_isProgressDeterminate)
+        {
+            _isProgressDeterminate = false;
+            OnPropertyChanged(nameof(IsProgressIndeterminate));
+        }
+    }
+
+    // Constructed on the UI thread so the Progress<T> callbacks marshal back to it; the COM object is acquired
+    // and used entirely on this single STA apartment.
+    private static Task<T> RunOnStaThread<T>(Func<T> work)
+    {
+        var completion = new TaskCompletionSource<T>();
+        var thread = new Thread(() =>
+        {
+            try
+            {
+                completion.SetResult(work());
+            }
+            catch (Exception ex)
+            {
+                completion.SetException(ex);
+            }
+        })
+        {
+            IsBackground = true
+        };
+        thread.SetApartmentState(ApartmentState.STA);
+        thread.Start();
+        return completion.Task;
     }
 
     private static string? BrowseSnapshotFile(string title)

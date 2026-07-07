@@ -116,7 +116,12 @@ public sealed class IfcImportService
 
         progress?.Report(new IfcImportProgress(96, "Cleaning up and validating...", true));
         if (options.ApplyFrameConditioning)
-            result.Warnings.AddRange(_frameConditioningService.ConditionFrames(result.Frames, options.FrameConditioningMergeTolerance));
+        {
+            List<AnalyticalAreaElement> conditioningWalls = result.Areas
+                .Where(area => string.Equals(area.IfcType, "IfcWall", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            result.Warnings.AddRange(_frameConditioningService.ConditionFrames(result.Frames, conditioningWalls, options.FrameConditioningMergeTolerance));
+        }
         AddScaleSanityWarning(result, lengthFactor);
         result.Warnings.AddRange(_coordinateOriginService.ApplyCoordinateOriginReset(result, options));
         List<IfcImportWarning> snapWarnings = _nodeSnapper.SnapFrameEndpoints(result.Frames, options.NodeSnapTolerance);
