@@ -57,7 +57,12 @@ internal static class Program
             ("Restraint table handles aliased shuffled columns", RestraintTableHandlesAliasedColumns),
             ("Restraint table missing DOF column falls back", RestraintTableMissingColumnFallsBack),
             ("Restraint table parses varied boolean tokens", RestraintTableParsesVariedBooleans),
-            ("Restraint table drops all-free rows", RestraintTableDropsAllFreeRows)
+            ("Restraint table drops all-free rows", RestraintTableDropsAllFreeRows),
+            ("Summary counts identical model as unchanged", SummaryCountsIdenticalModel),
+            ("Summary counts added frame", SummaryCountsAddedFrame),
+            ("Summary counts removed frame", SummaryCountsRemovedFrame),
+            ("Summary counts modified frame", SummaryCountsModifiedFrame),
+            ("Summary counts added material", SummaryCountsAddedMaterial)
         ];
 
         int failed = 0;
@@ -750,6 +755,83 @@ internal static class Program
             "A well-formed table should parse.");
         Equal(1, joints.Count, "An all-free row should be dropped so only true supports remain.");
         Equal("P1", joints[0].PointName, "The remaining joint should be the restrained one.");
+    }
+
+    private static void SummaryCountsIdenticalModel()
+    {
+        ModelCompareComparisonResult result = Compare(Load("baseline.json"), Load("baseline.json"));
+
+        ModelCompareCategorySummary frames = SummaryOf(result, ModelCompareObjectType.Frame);
+        Equal(1, frames.Unchanged, "The single baseline frame should count as unchanged.");
+        Equal(0, frames.Added + frames.Removed + frames.Modified, "An identical model should have no frame changes.");
+        Equal(1, frames.Total, "Frame total should be the one physical frame.");
+
+        Equal(1, SummaryOf(result, ModelCompareObjectType.Area).Unchanged, "The single baseline area should count as unchanged.");
+        Equal(1, SummaryOf(result, ModelCompareObjectType.Material).Unchanged, "The single baseline material should count as unchanged.");
+        Equal(1, SummaryOf(result, ModelCompareObjectType.FrameProperty).Unchanged, "The single baseline frame property should count as unchanged.");
+        Equal(1, SummaryOf(result, ModelCompareObjectType.AreaProperty).Unchanged, "The single baseline area property should count as unchanged.");
+    }
+
+    private static void SummaryCountsAddedFrame()
+    {
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        newSnapshot.Frames.Add(new ModelCompareFrameSnapshot
+        {
+            FrameName = "F2", Story = "Story1", IX = 2, IY = 0, IZ = 0, JX = 2, JY = 0, JZ = 3, Length = 3, SectionName = "S1", MaterialName = "Concrete"
+        });
+
+        ModelCompareCategorySummary frames = SummaryOf(Compare(oldSnapshot, newSnapshot), ModelCompareObjectType.Frame);
+        Equal(1, frames.Added, "The new frame should count as added.");
+        Equal(1, frames.Unchanged, "The original frame should remain unchanged.");
+        Equal(0, frames.Removed + frames.Modified, "No frame should be removed or modified.");
+        Equal(2, frames.Total, "Frame total should be the two physical frames.");
+    }
+
+    private static void SummaryCountsRemovedFrame()
+    {
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        newSnapshot.Frames.Clear();
+
+        ModelCompareCategorySummary frames = SummaryOf(Compare(oldSnapshot, newSnapshot), ModelCompareObjectType.Frame);
+        Equal(1, frames.Removed, "The deleted frame should count as removed.");
+        Equal(0, frames.Unchanged + frames.Added + frames.Modified, "Nothing should be unchanged/added/modified.");
+        Equal(1, frames.Total, "Frame total should be the one removed frame.");
+    }
+
+    private static void SummaryCountsModifiedFrame()
+    {
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        newSnapshot.Frames[0].SectionName = "S2";
+
+        ModelCompareCategorySummary frames = SummaryOf(Compare(oldSnapshot, newSnapshot), ModelCompareObjectType.Frame);
+        Equal(1, frames.Modified, "The frame with a section change should count as modified.");
+        Equal(0, frames.Unchanged + frames.Added + frames.Removed, "Nothing should be unchanged/added/removed.");
+    }
+
+    private static void SummaryCountsAddedMaterial()
+    {
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        newSnapshot.Materials.Add(new ModelCompareMaterialSnapshot
+        {
+            MaterialName = "Steel", MaterialType = "Steel", ElasticModulus = 200000, PoissonRatio = 0.3, UnitWeight = 77
+        });
+
+        ModelCompareCategorySummary materials = SummaryOf(Compare(oldSnapshot, newSnapshot), ModelCompareObjectType.Material);
+        Equal(1, materials.Added, "The new material should count as added.");
+        Equal(1, materials.Unchanged, "The original material should remain unchanged.");
+        Equal(0, materials.Removed + materials.Modified, "No material should be removed or modified.");
+        Equal(2, materials.Total, "Material total should be the two definitions.");
+    }
+
+    private static ModelCompareCategorySummary SummaryOf(ModelCompareComparisonResult result, ModelCompareObjectType objectType)
+    {
+        True(result.CategorySummaries.TryGetValue(objectType, out ModelCompareCategorySummary? summary),
+            $"Expected a category summary for {objectType}.");
+        return summary!;
     }
 
     private static ModelCompareSnapshot SnapshotWithJoints(params ModelCompareJointSnapshot[] joints)

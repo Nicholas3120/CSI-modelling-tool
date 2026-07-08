@@ -79,6 +79,18 @@ public sealed class ModelCompareResultRowViewModel : ModelCompareResultRow, INot
         };
     }
 
+    // The field name shown in the detail pane's "Property" column — the tail of the description after " / "
+    // (e.g. "section", "geometry"), or the whole description for added/removed rows.
+    public string FieldName
+    {
+        get
+        {
+            int index = ObjectDescription.LastIndexOf(" / ", StringComparison.Ordinal);
+            string field = index >= 0 ? ObjectDescription[(index + 3)..] : ObjectDescription;
+            return field.Trim();
+        }
+    }
+
     public string MatchMethodText => MatchMethod switch
     {
         ModelCompareMatchMethod.ExactCoordinates => "Exact coordinates",

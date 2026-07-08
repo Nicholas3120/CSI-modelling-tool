@@ -27,11 +27,6 @@ public sealed class ModelCompareViewModel : ObservableObject
     private string _connectionStatus = "Not connected";
     private string _operationStatus = "Ready.";
     private bool _isBusy;
-    private double _coordinateToleranceMm = 1.0;
-    private double _lengthToleranceMm = 1.0;
-    private double _orientationToleranceDegrees = 0.1;
-    private double _movedFrameSearchDistanceMm = 500.0;
-    private ModelCompareConfidenceLevel _minimumMovedFrameConfidence = ModelCompareConfidenceLevel.Medium;
     private string _selectedChangeTypeFilter = "All";
     private string _selectedObjectTypeFilter = "All";
     private string _selectedConfidenceFilter = "All";
@@ -44,6 +39,16 @@ public sealed class ModelCompareViewModel : ObservableObject
     private double _progressPercent;
     private string _progressText = "";
     private bool _isProgressDeterminate;
+    private ModelCompareCategoryNodeViewModel? _selectedCategoryNode;
+    private ModelCompareObjectResultViewModel? _selectedObjectResult;
+    private bool _baseUseLive = true;
+    private EtabsInstanceInfo? _baseInstance;
+    private bool _compareUseLive = true;
+    private EtabsInstanceInfo? _compareInstance;
+    private int _totalAdded;
+    private int _totalRemoved;
+    private int _totalModified;
+    private int _totalUnchanged;
 
     public ModelCompareViewModel()
     {
@@ -58,6 +63,7 @@ public sealed class ModelCompareViewModel : ObservableObject
         LoadOldSnapshotCommand = new RelayCommand(_ => LoadOldSnapshot(), _ => !IsBusy);
         LoadNewSnapshotCommand = new RelayCommand(_ => LoadNewSnapshot(), _ => !IsBusy);
         CompareSnapshotsCommand = new RelayCommand(_ => CompareSnapshots(), _ => !IsBusy);
+        RunComparisonCommand = new RelayCommand(_ => RunComparison(), _ => !IsBusy);
         SelectResultObjectInEtabsCommand = new RelayCommand(SelectResultObjectInEtabs, CanSelectResultObjectInEtabs);
         SelectHighlightedResultsInEtabsCommand = new RelayCommand(SelectHighlightedResultsInEtabs, _ => !IsBusy);
     }
@@ -65,9 +71,9 @@ public sealed class ModelCompareViewModel : ObservableObject
     public ObservableCollection<EtabsInstanceInfo> EtabsInstances { get; } = [];
     public ObservableCollection<ModelCompareResultRowViewModel> Results { get; } = [];
     public ObservableCollection<ModelCompareObjectResultViewModel> ObjectResults { get; } = [];
+    public ObservableCollection<ModelCompareCategoryNodeViewModel> Categories { get; } = [];
     public ObservableCollection<ValidationIssue> Messages { get; } = [];
     public ICollectionView FilteredResults { get; }
-    public IReadOnlyList<ModelCompareConfidenceLevel> MovedFrameConfidenceLevels { get; } = Enum.GetValues<ModelCompareConfidenceLevel>();
     public IReadOnlyList<string> ReviewStatusOptions { get; } = ["Unreviewed", "Reviewed", "Ignored", "Needs checking"];
     public IReadOnlyList<string> ChangeTypeFilterOptions { get; } = ["All", .. Enum.GetNames<ModelCompareChangeType>()];
     public IReadOnlyList<string> ObjectTypeFilterOptions { get; } = ["All", .. Enum.GetNames<ModelCompareObjectType>()];
@@ -84,6 +90,7 @@ public sealed class ModelCompareViewModel : ObservableObject
     public ICommand LoadOldSnapshotCommand { get; }
     public ICommand LoadNewSnapshotCommand { get; }
     public ICommand CompareSnapshotsCommand { get; }
+    public ICommand RunComparisonCommand { get; }
     public ICommand SelectResultObjectInEtabsCommand { get; }
     public ICommand SelectHighlightedResultsInEtabsCommand { get; }
 
@@ -178,60 +185,6 @@ public sealed class ModelCompareViewModel : ObservableObject
     // determinate percentage once the per-object passes start reporting.
     public bool IsProgressIndeterminate => IsBusy && !_isProgressDeterminate;
 
-    public double CoordinateToleranceMm
-    {
-        get => _coordinateToleranceMm;
-        set
-        {
-            double normalized = double.IsFinite(value) && value > 0 ? value : 1.0;
-            if (SetProperty(ref _coordinateToleranceMm, normalized))
-                ClearComparisonResults();
-        }
-    }
-
-    public double LengthToleranceMm
-    {
-        get => _lengthToleranceMm;
-        set
-        {
-            double normalized = double.IsFinite(value) && value > 0 ? value : 1.0;
-            if (SetProperty(ref _lengthToleranceMm, normalized))
-                ClearComparisonResults();
-        }
-    }
-
-    public double OrientationToleranceDegrees
-    {
-        get => _orientationToleranceDegrees;
-        set
-        {
-            double normalized = double.IsFinite(value) && value > 0 ? value : 0.1;
-            if (SetProperty(ref _orientationToleranceDegrees, normalized))
-                ClearComparisonResults();
-        }
-    }
-
-    public double MovedFrameSearchDistanceMm
-    {
-        get => _movedFrameSearchDistanceMm;
-        set
-        {
-            double normalized = double.IsFinite(value) && value > 0 ? value : 500.0;
-            if (SetProperty(ref _movedFrameSearchDistanceMm, normalized))
-                ClearComparisonResults();
-        }
-    }
-
-    public ModelCompareConfidenceLevel MinimumMovedFrameConfidence
-    {
-        get => _minimumMovedFrameConfidence;
-        set
-        {
-            if (SetProperty(ref _minimumMovedFrameConfidence, value))
-                ClearComparisonResults();
-        }
-    }
-
     public string SelectedChangeTypeFilter
     {
         get => _selectedChangeTypeFilter;
@@ -303,6 +256,67 @@ public sealed class ModelCompareViewModel : ObservableObject
     }
 
     public int FilteredResultCount => FilteredResults.Cast<object>().Count();
+
+    // Project Explorer selection: choosing a category node drives the existing object-type filter, so the
+    // results list narrows to that category.
+    public ModelCompareCategoryNodeViewModel? SelectedCategoryNode
+    {
+        get => _selectedCategoryNode;
+        set
+        {
+            if (SetProperty(ref _selectedCategoryNode, value) && value != null)
+                SelectedObjectTypeFilter = value.ObjectTypeFilter;
+        }
+    }
+
+    // Master-detail: the object highlighted in the results list drives the detail (base-vs-compare) pane.
+    public ModelCompareObjectResultViewModel? SelectedObjectResult
+    {
+        get => _selectedObjectResult;
+        set
+        {
+            if (SetProperty(ref _selectedObjectResult, value))
+            {
+                OnPropertyChanged(nameof(SelectedObjectRows));
+                OnPropertyChanged(nameof(HasSelectedObject));
+            }
+        }
+    }
+
+    public IReadOnlyList<ModelCompareResultRowViewModel> SelectedObjectRows => _selectedObjectResult?.Rows ?? [];
+    public bool HasSelectedObject => _selectedObjectResult != null;
+    public bool HasComparison => Categories.Count > 0;
+
+    public int TotalAdded { get => _totalAdded; private set => SetProperty(ref _totalAdded, value); }
+    public int TotalRemoved { get => _totalRemoved; private set => SetProperty(ref _totalRemoved, value); }
+    public int TotalModified { get => _totalModified; private set => SetProperty(ref _totalModified, value); }
+    public int TotalUnchanged { get => _totalUnchanged; private set => SetProperty(ref _totalUnchanged, value); }
+
+    // One-button comparison sources. Each side is either a saved snapshot file (the existing Old/New paths) or
+    // a live ETABS instance chosen here.
+    public bool BaseUseLive
+    {
+        get => _baseUseLive;
+        set => SetProperty(ref _baseUseLive, value);
+    }
+
+    public EtabsInstanceInfo? BaseInstance
+    {
+        get => _baseInstance;
+        set => SetProperty(ref _baseInstance, value);
+    }
+
+    public bool CompareUseLive
+    {
+        get => _compareUseLive;
+        set => SetProperty(ref _compareUseLive, value);
+    }
+
+    public EtabsInstanceInfo? CompareInstance
+    {
+        get => _compareInstance;
+        set => SetProperty(ref _compareInstance, value);
+    }
 
     public int FramesAddedCount => Results.Count(row => row.ObjectType == ModelCompareObjectType.Frame && row.ChangeType == ModelCompareChangeType.Added);
     public int FramesDeletedCount => Results.Count(row => row.ObjectType == ModelCompareObjectType.Frame && row.ChangeType == ModelCompareChangeType.Removed);
@@ -468,21 +482,119 @@ public sealed class ModelCompareViewModel : ObservableObject
                 _oldSnapshot,
                 _newSnapshot,
                 BuildToleranceSettings());
-            ReplaceCollection(Results, comparison.Differences.Select(row => new ModelCompareResultRowViewModel(row)));
-            ReplaceObjectResults(BuildObjectResults(Results));
-            RebuildStoryFilterOptions();
-            RefreshSummaryCounts();
-            RefreshResultFilter();
-            warnings.AddRange(comparison.Warnings);
-            string summary = comparison.Errors.Count > 0
-                ? $"Comparison incomplete. Frame comparison is unavailable. Found {Results.Count} difference(s) in available categories."
-                : $"Comparison complete. Found {Results.Count} difference(s).";
-            ShowMessages(
-                warnings,
-                comparison.Errors.Count > 0 ? ValidationSeverity.Critical : ValidationSeverity.Info,
-                summary,
-                comparison.Errors);
+            PopulateComparison(comparison, warnings);
         });
+    }
+
+    // One-button comparison: resolve each side (live ETABS or snapshot file) on the background STA thread, run
+    // the diff, then apply the results on the UI thread. Replaces the manual snapshot/load/compare sequence.
+    private async void RunComparison()
+    {
+        if (IsBusy)
+            return;
+
+        bool baseLive = BaseUseLive;
+        string baseInstanceId = BaseInstance?.Id ?? "";
+        string basePath = OldSnapshotPath;
+        bool compareLive = CompareUseLive;
+        string compareInstanceId = CompareInstance?.Id ?? "";
+        string comparePath = NewSnapshotPath;
+        ModelCompareToleranceSettings tolerances = BuildToleranceSettings();
+
+        if (!ValidateSource(baseLive, baseInstanceId, basePath, "base") ||
+            !ValidateSource(compareLive, compareInstanceId, comparePath, "compare"))
+        {
+            return;
+        }
+
+        await RunEtabsAsync("Comparing models...", cancellable: true, (progress, token) =>
+        {
+            var warnings = new List<string>();
+            (ModelCompareSnapshot? baseSnapshot, string baseError) = ResolveSource(baseLive, baseInstanceId, basePath, "Base", progress, token, warnings);
+            if (baseSnapshot == null)
+                return () => ShowMessages(warnings, ValidationSeverity.Critical, baseError);
+
+            token.ThrowIfCancellationRequested();
+            (ModelCompareSnapshot? compareSnapshot, string compareError) = ResolveSource(compareLive, compareInstanceId, comparePath, "Compare", progress, token, warnings);
+            if (compareSnapshot == null)
+                return () => ShowMessages(warnings, ValidationSeverity.Critical, compareError);
+
+            ModelCompareComparisonResult comparison = _compareService.CompareSnapshots(baseSnapshot, compareSnapshot, tolerances);
+            return () =>
+            {
+                _oldSnapshot = baseSnapshot;
+                _newSnapshot = compareSnapshot;
+                OnPropertyChanged(nameof(OldSnapshotSummary));
+                OnPropertyChanged(nameof(NewSnapshotSummary));
+                PopulateComparison(comparison, warnings);
+            };
+        });
+    }
+
+    private bool ValidateSource(bool useLive, string instanceId, string path, string label)
+    {
+        if (useLive && string.IsNullOrWhiteSpace(instanceId))
+        {
+            ShowMessages([], ValidationSeverity.Warning, $"Choose a live ETABS instance for the {label} model, or refresh instances first.");
+            return false;
+        }
+
+        if (!useLive && string.IsNullOrWhiteSpace(path))
+        {
+            ShowMessages([], ValidationSeverity.Warning, $"Choose a snapshot file for the {label} model.");
+            return false;
+        }
+
+        return true;
+    }
+
+    // Runs on the background STA thread: reads a live model via COM or loads a snapshot file. Returns null on
+    // failure with a message; never touches UI collections.
+    private (ModelCompareSnapshot? Snapshot, string Error) ResolveSource(
+        bool useLive,
+        string instanceId,
+        string path,
+        string label,
+        IProgress<ModelCompareExtractionProgress> progress,
+        CancellationToken token,
+        List<string> warnings)
+    {
+        if (useLive)
+        {
+            ModelCompareSnapshotResult result = _etabsService.ExtractModelCompareSnapshot(
+                new ModelCompareSnapshotRequest { EtabsInstanceId = instanceId },
+                progress,
+                token);
+            warnings.AddRange(result.Warnings);
+            return result.Snapshot == null || result.IsError
+                ? (null, $"{label} model could not be read from ETABS: {result.Message}")
+                : (result.Snapshot, "");
+        }
+
+        ModelCompareSnapshotLoadResult loadResult = _jsonService.LoadSnapshot(path);
+        warnings.AddRange(loadResult.Warnings);
+        return loadResult.Snapshot == null || loadResult.IsError
+            ? (null, $"{label} snapshot could not be loaded: {loadResult.Message}")
+            : (loadResult.Snapshot, "");
+    }
+
+    private void PopulateComparison(ModelCompareComparisonResult comparison, List<string> warnings)
+    {
+        ReplaceCollection(Results, comparison.Differences.Select(row => new ModelCompareResultRowViewModel(row)));
+        ReplaceObjectResults(BuildObjectResults(Results));
+        RebuildCategories(comparison.CategorySummaries);
+        RebuildStoryFilterOptions();
+        RefreshSummaryCounts();
+        RefreshResultFilter();
+        warnings.AddRange(comparison.Warnings);
+        string summary = comparison.Errors.Count > 0
+            ? $"Comparison incomplete. Frame comparison is unavailable. Found {Results.Count} difference(s) in available categories."
+            : $"Comparison complete. Found {Results.Count} difference(s).";
+        ShowMessages(
+            warnings,
+            comparison.Errors.Count > 0 ? ValidationSeverity.Critical : ValidationSeverity.Info,
+            summary,
+            comparison.Errors);
     }
 
     private bool CanSelectResultObjectInEtabs(object? parameter)
@@ -836,9 +948,49 @@ public sealed class ModelCompareViewModel : ObservableObject
     {
         Results.Clear();
         ReplaceObjectResults([]);
+        Categories.Clear();
+        SelectedObjectResult = null;
+        TotalAdded = TotalRemoved = TotalModified = TotalUnchanged = 0;
+        OnPropertyChanged(nameof(HasComparison));
         RebuildStoryFilterOptions();
         RefreshSummaryCounts();
         RefreshResultFilter();
+    }
+
+    private static readonly (ModelCompareObjectType Type, string Display)[] CategoryOrder =
+    [
+        (ModelCompareObjectType.Frame, "Frames"),
+        (ModelCompareObjectType.Area, "Areas"),
+        (ModelCompareObjectType.Joint, "Joints"),
+        (ModelCompareObjectType.FrameProperty, "Frame properties"),
+        (ModelCompareObjectType.AreaProperty, "Area properties"),
+        (ModelCompareObjectType.Material, "Materials")
+    ];
+
+    private void RebuildCategories(IReadOnlyDictionary<ModelCompareObjectType, ModelCompareCategorySummary> summaries)
+    {
+        var nodes = new List<ModelCompareCategoryNodeViewModel>();
+        int added = 0, removed = 0, modified = 0, unchanged = 0;
+        foreach ((ModelCompareObjectType type, string display) in CategoryOrder)
+        {
+            if (!summaries.TryGetValue(type, out ModelCompareCategorySummary? summary))
+                continue;
+
+            nodes.Add(new ModelCompareCategoryNodeViewModel(display, type.ToString(), summary.Added, summary.Removed, summary.Modified, summary.Unchanged));
+            added += summary.Added;
+            removed += summary.Removed;
+            modified += summary.Modified;
+            unchanged += summary.Unchanged;
+        }
+
+        var allNode = new ModelCompareCategoryNodeViewModel("All changes", "All", added, removed, modified, unchanged);
+        ReplaceCollection(Categories, new[] { allNode }.Concat(nodes));
+        TotalAdded = added;
+        TotalRemoved = removed;
+        TotalModified = modified;
+        TotalUnchanged = unchanged;
+        OnPropertyChanged(nameof(HasComparison));
+        SelectedCategoryNode = Categories.FirstOrDefault();
     }
 
     private bool FilterObjectResult(object item)
@@ -988,22 +1140,12 @@ public sealed class ModelCompareViewModel : ObservableObject
             SelectedStoryFilter = "All";
     }
 
-    private ModelCompareToleranceSettings BuildToleranceSettings()
+    // Tolerances are fixed sensible defaults (1 mm coordinate, etc.). They were exposed as UI knobs, but with
+    // ID-based matching the moved-frame knobs are near-vestigial and two versions of the same model have
+    // essentially identical coordinates, so the defaults cover the real cases. The model's own defaults match.
+    private static ModelCompareToleranceSettings BuildToleranceSettings()
     {
-        double coordinateTolerance = CoordinateToleranceMm / 1000.0;
-        double lengthTolerance = LengthToleranceMm / 1000.0;
-        double movementSearchDistance = MovedFrameSearchDistanceMm / 1000.0;
-
-        return new ModelCompareToleranceSettings
-        {
-            CoordinateTolerance = coordinateTolerance,
-            LengthTolerance = lengthTolerance,
-            MovedFrameLengthTolerance = lengthTolerance,
-            MovedFrameOrientationToleranceDegrees = OrientationToleranceDegrees,
-            MovementSearchDistance = movementSearchDistance,
-            MovementTolerance = movementSearchDistance,
-            MinimumMovedFrameConfidence = MinimumMovedFrameConfidence
-        };
+        return new ModelCompareToleranceSettings();
     }
 
     private static string BuildSnapshotSummary(ModelCompareSnapshot snapshot)

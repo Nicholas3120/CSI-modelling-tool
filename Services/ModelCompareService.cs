@@ -28,7 +28,7 @@ public sealed class ModelCompareService
 
         if (CanCompareCategory(oldSnapshot.Metadata.FramesReadStatus, newSnapshot.Metadata.FramesReadStatus))
         {
-            CompareFrames(oldSnapshot.Frames, newSnapshot.Frames, settings, framePropertyDataAvailable, results, comparison.Warnings);
+            CompareFrames(oldSnapshot.Frames, newSnapshot.Frames, settings, framePropertyDataAvailable, results, comparison.Warnings, SummaryFor(comparison, ModelCompareObjectType.Frame));
             AddReadWarningIfNeeded("Frame", oldSnapshot.Metadata.FramesReadStatus, newSnapshot.Metadata.FramesReadStatus, comparison.Warnings);
             if (!framePropertyDataAvailable)
                 comparison.Warnings.Add("Frame material assignment comparison was skipped because frame property completeness is unavailable.");
@@ -49,7 +49,7 @@ public sealed class ModelCompareService
             comparison,
             () =>
             {
-                CompareAreas(oldSnapshot.Areas, newSnapshot.Areas, settings, areaPropertyDataAvailable, results);
+                CompareAreas(oldSnapshot.Areas, newSnapshot.Areas, settings, areaPropertyDataAvailable, results, SummaryFor(comparison, ModelCompareObjectType.Area));
                 if (!areaPropertyDataAvailable)
                     comparison.Warnings.Add("Area material and thickness comparison was skipped because area property completeness is unavailable.");
             });
@@ -58,25 +58,25 @@ public sealed class ModelCompareService
             oldSnapshot.Metadata.FramePropertiesReadStatus,
             newSnapshot.Metadata.FramePropertiesReadStatus,
             comparison,
-            () => CompareFrameProperties(oldSnapshot.FrameProperties, newSnapshot.FrameProperties, settings, results));
+            () => CompareFrameProperties(oldSnapshot.FrameProperties, newSnapshot.FrameProperties, settings, results, SummaryFor(comparison, ModelCompareObjectType.FrameProperty)));
         CompareOptionalCategory(
             "Area property",
             oldSnapshot.Metadata.AreaPropertiesReadStatus,
             newSnapshot.Metadata.AreaPropertiesReadStatus,
             comparison,
-            () => CompareAreaProperties(oldSnapshot.AreaProperties, newSnapshot.AreaProperties, settings, results));
+            () => CompareAreaProperties(oldSnapshot.AreaProperties, newSnapshot.AreaProperties, settings, results, SummaryFor(comparison, ModelCompareObjectType.AreaProperty)));
         CompareOptionalCategory(
             "Material",
             oldSnapshot.Metadata.MaterialsReadStatus,
             newSnapshot.Metadata.MaterialsReadStatus,
             comparison,
-            () => CompareMaterials(oldSnapshot.Materials, newSnapshot.Materials, settings, results));
+            () => CompareMaterials(oldSnapshot.Materials, newSnapshot.Materials, settings, results, SummaryFor(comparison, ModelCompareObjectType.Material)));
         CompareOptionalCategory(
             "Joint",
             oldSnapshot.Metadata.JointsReadStatus,
             newSnapshot.Metadata.JointsReadStatus,
             comparison,
-            () => CompareJoints(oldSnapshot.Joints, newSnapshot.Joints, settings, results));
+            () => CompareJoints(oldSnapshot.Joints, newSnapshot.Joints, settings, results, SummaryFor(comparison, ModelCompareObjectType.Joint)));
 
         comparison.Differences = results
             .OrderBy(row => row.ObjectType)
@@ -85,6 +85,28 @@ public sealed class ModelCompareService
             .ThenBy(row => row.NewValue, StringComparer.OrdinalIgnoreCase)
             .ToList();
         return comparison;
+    }
+
+    private static ModelCompareCategorySummary SummaryFor(ModelCompareComparisonResult comparison, ModelCompareObjectType objectType)
+    {
+        if (!comparison.CategorySummaries.TryGetValue(objectType, out ModelCompareCategorySummary? summary))
+        {
+            summary = new ModelCompareCategorySummary();
+            comparison.CategorySummaries[objectType] = summary;
+        }
+
+        return summary;
+    }
+
+    // A matched object pair is "Modified" if the comparison emitted at least one difference row for it (the
+    // result list grew), otherwise "Unchanged". Diagnostics/nav-context passes mutate existing rows rather than
+    // adding, so the row count is a reliable change signal.
+    private static void TallyMatched(ModelCompareCategorySummary summary, int resultCountBefore, int resultCountAfter)
+    {
+        if (resultCountAfter > resultCountBefore)
+            summary.Modified++;
+        else
+            summary.Unchanged++;
     }
 
     private static void CompareOptionalCategory(
@@ -143,7 +165,8 @@ public sealed class ModelCompareService
         ModelCompareToleranceSettings settings,
         bool compareMaterialAssignments,
         List<ModelCompareResultRow> results,
-        List<string> warnings)
+        List<string> warnings,
+        ModelCompareCategorySummary summary)
     {
         List<ModelCompareFrameSnapshot> orderedOldFrames = oldFrames
             .OrderBy(frame => frame.FrameName, StringComparer.OrdinalIgnoreCase)
@@ -183,6 +206,7 @@ public sealed class ModelCompareService
                 "Matched by tool-owned persistent member ID."));
             ApplySearchContext(results, uidResultStart, BuildFrameSearchText(oldFrame, uidNewFrame));
             ApplyFrameNavigationContext(results, uidResultStart, oldFrame, uidNewFrame);
+            TallyMatched(summary, uidResultStart, results.Count);
         }
 
         for (int oldIndex = 0; oldIndex < orderedOldFrames.Count; oldIndex++)
@@ -227,6 +251,7 @@ public sealed class ModelCompareService
                     : $"Frame I and J endpoints match within {FormatNumber(settings.CoordinateTolerance)}."));
             ApplySearchContext(results, resultStart, BuildFrameSearchText(oldFrame, newFrame));
             ApplyFrameNavigationContext(results, resultStart, oldFrame, newFrame);
+            TallyMatched(summary, resultStart, results.Count);
         }
 
         // Identity is established only from the tracking ID and the geometry (exact, reversed, then near).
@@ -250,7 +275,7 @@ public sealed class ModelCompareService
         }
         else
         {
-            MatchLikelyMovedFrames(unmatchedOldFrames, unmatchedNewFrames, settings, compareMaterialAssignments, results);
+            MatchLikelyMovedFrames(unmatchedOldFrames, unmatchedNewFrames, settings, compareMaterialAssignments, results, summary);
         }
 
         string unmatchedOldReason = movedMatchingSkipped
@@ -273,6 +298,7 @@ public sealed class ModelCompareService
                 diagnostics: BuildUnmatchedDiagnostics(unmatchedOldReason),
                 searchText: BuildFrameSearchText(oldFrame, null)));
             ApplyFrameNavigationContext(results, resultStart, oldFrame, null);
+            summary.Removed++;
         }
 
         foreach (ModelCompareFrameSnapshot newFrame in unmatchedNewFrames)
@@ -288,6 +314,7 @@ public sealed class ModelCompareService
                 diagnostics: BuildUnmatchedDiagnostics(unmatchedNewReason),
                 searchText: BuildFrameSearchText(null, newFrame)));
             ApplyFrameNavigationContext(results, resultStart, null, newFrame);
+            summary.Added++;
         }
     }
 
@@ -350,7 +377,8 @@ public sealed class ModelCompareService
         IReadOnlyList<ModelCompareAreaObjectSnapshot> newAreas,
         ModelCompareToleranceSettings settings,
         bool comparePropertyDetails,
-        List<ModelCompareResultRow> results)
+        List<ModelCompareResultRow> results,
+        ModelCompareCategorySummary summary)
     {
         List<ModelCompareAreaObjectSnapshot> orderedOld = oldAreas
             .OrderBy(area => area.AreaName, StringComparer.OrdinalIgnoreCase)
@@ -383,9 +411,11 @@ public sealed class ModelCompareService
 
             matchedOld.Add(oldIndex);
             matchedNew.Add(newIndex);
+            int uidResultStart = results.Count;
             MatchAreaPair(orderedOld[oldIndex], orderedNew[newIndex], settings, comparePropertyDetails, results,
                 ModelCompareMatchMethod.PersistentId, "Matched by tool-owned area ID.");
             RecordRelocatedIdMatch(orderedOld[oldIndex], orderedNew[newIndex], settings, relocatedIdMatches);
+            TallyMatched(summary, uidResultStart, results.Count);
         }
 
         // Tier 2: normalized geometric key (quantized, collinear edge nodes dropped, order-independent).
@@ -420,13 +450,15 @@ public sealed class ModelCompareService
             int newIndex = queue.Dequeue();
             matchedOld.Add(oldIndex);
             matchedNew.Add(newIndex);
+            int geometryResultStart = results.Count;
             MatchAreaPair(orderedOld[oldIndex], orderedNew[newIndex], settings, comparePropertyDetails, results,
                 ModelCompareMatchMethod.ExactAreaGeometry, "Normalized area corner geometry matches.");
+            TallyMatched(summary, geometryResultStart, results.Count);
         }
 
         // Tier 3: coverage / re-partition. A slab split into several (or several merged into one) covers the
         // same footprint on the same plane, so report it as a single re-partition instead of add + remove.
-        DetectAreaRepartitions(orderedOld, orderedNew, matchedOld, matchedNew, settings, comparePropertyDetails, results);
+        DetectAreaRepartitions(orderedOld, orderedNew, matchedOld, matchedNew, settings, comparePropertyDetails, results, summary);
 
         for (int oldIndex = 0; oldIndex < orderedOld.Count; oldIndex++)
         {
@@ -445,6 +477,7 @@ public sealed class ModelCompareService
                 diagnostics: BuildUnmatchedDiagnostics("No area with a matching ID or stable geometry was found in the new snapshot."),
                 searchText: BuildAreaSearchText(oldArea, null)));
             ApplyAreaNavigationContext(results, resultStart, oldArea, null);
+            summary.Removed++;
         }
 
         for (int newIndex = 0; newIndex < orderedNew.Count; newIndex++)
@@ -465,6 +498,7 @@ public sealed class ModelCompareService
                 searchText: BuildAreaSearchText(null, newArea)));
             ApplyAreaNavigationContext(results, resultStart, null, newArea);
             DetectAndEmitAreaBackfill(newArea, settings, relocatedIdMatches, results);
+            summary.Added++;
         }
     }
 
@@ -558,7 +592,8 @@ public sealed class ModelCompareService
         HashSet<int> matchedNew,
         ModelCompareToleranceSettings settings,
         bool comparePropertyDetails,
-        List<ModelCompareResultRow> results)
+        List<ModelCompareResultRow> results,
+        ModelCompareCategorySummary summary)
     {
         List<int> oldIndexes = Enumerable.Range(0, orderedOld.Count).Where(i => !matchedOld.Contains(i)).ToList();
         List<int> newIndexes = Enumerable.Range(0, orderedNew.Count).Where(i => !matchedNew.Contains(i)).ToList();
@@ -658,12 +693,16 @@ public sealed class ModelCompareService
                 if (componentOld.Count == 1 && componentNew.Count == 1)
                 {
                     // Same footprint, different corner geometry: a reshaped slab. Reuse the matched-area diff.
+                    int reshapeResultStart = results.Count;
                     MatchAreaPair(oldAreas[0], newAreas[0], settings, comparePropertyDetails, results,
                         ModelCompareMatchMethod.ExactAreaGeometry, "Same footprint on the same plane (reshaped).");
+                    TallyMatched(summary, reshapeResultStart, results.Count);
                 }
                 else
                 {
                     EmitAreaRepartition(oldAreas, newAreas, results);
+                    // A split/merge re-partitions the region: count each resulting new area as modified.
+                    summary.Modified += componentNew.Count;
                 }
             }
         }
@@ -943,7 +982,8 @@ public sealed class ModelCompareService
         List<ModelCompareFrameSnapshot> unmatchedNewFrames,
         ModelCompareToleranceSettings settings,
         bool compareMaterialAssignments,
-        List<ModelCompareResultRow> results)
+        List<ModelCompareResultRow> results,
+        ModelCompareCategorySummary summary)
     {
         foreach (ModelCompareFrameSnapshot oldFrame in unmatchedOldFrames.ToList())
         {
@@ -986,6 +1026,7 @@ public sealed class ModelCompareService
                 best.OrientationDifferenceDegrees));
             ApplySearchContext(results, resultStart, BuildFrameSearchText(oldFrame, best.NewFrame));
             ApplyFrameNavigationContext(results, resultStart, oldFrame, best.NewFrame);
+            summary.Modified++;
         }
     }
 
@@ -1174,35 +1215,45 @@ public sealed class ModelCompareService
         IReadOnlyList<ModelCompareFramePropertySnapshot> oldProperties,
         IReadOnlyList<ModelCompareFramePropertySnapshot> newProperties,
         ModelCompareToleranceSettings settings,
-        List<ModelCompareResultRow> results)
+        List<ModelCompareResultRow> results,
+        ModelCompareCategorySummary summary)
     {
         Dictionary<string, ModelCompareFramePropertySnapshot> oldByName = BuildUniqueLookup(oldProperties, property => property.SectionName);
         Dictionary<string, ModelCompareFramePropertySnapshot> newByName = BuildUniqueLookup(newProperties, property => property.SectionName);
 
+        int modified = 0;
         foreach (string name in oldByName.Keys.Intersect(newByName.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
         {
             ModelCompareFramePropertySnapshot oldProperty = oldByName[name];
             ModelCompareFramePropertySnapshot newProperty = newByName[name];
             string description = $"Frame section '{name}'";
 
+            int start = results.Count;
             AddNumericDifference(results, ModelCompareObjectType.FrameProperty, $"{description} / depth", oldProperty.Depth, newProperty.Depth, settings.DimensionTolerance, ModelCompareChangeImportance.High);
             AddNumericDifference(results, ModelCompareObjectType.FrameProperty, $"{description} / width", oldProperty.Width, newProperty.Width, settings.DimensionTolerance, ModelCompareChangeImportance.High);
             AddNumericDifference(results, ModelCompareObjectType.FrameProperty, $"{description} / flange thickness", oldProperty.FlangeThickness, newProperty.FlangeThickness, settings.DimensionTolerance, ModelCompareChangeImportance.High);
             AddNumericDifference(results, ModelCompareObjectType.FrameProperty, $"{description} / web thickness", oldProperty.WebThickness, newProperty.WebThickness, settings.DimensionTolerance, ModelCompareChangeImportance.High);
+            if (results.Count > start)
+                modified++;
         }
+
+        SummarizeDefinitionCategory(summary, oldByName.Keys, newByName.Keys, modified);
     }
 
     private static void CompareAreaProperties(
         IReadOnlyList<ModelCompareAreaPropertySnapshot> oldProperties,
         IReadOnlyList<ModelCompareAreaPropertySnapshot> newProperties,
         ModelCompareToleranceSettings settings,
-        List<ModelCompareResultRow> results)
+        List<ModelCompareResultRow> results,
+        ModelCompareCategorySummary summary)
     {
         Dictionary<string, ModelCompareAreaPropertySnapshot> oldByName = BuildUniqueLookup(oldProperties, property => property.PropertyName);
         Dictionary<string, ModelCompareAreaPropertySnapshot> newByName = BuildUniqueLookup(newProperties, property => property.PropertyName);
 
+        int modified = 0;
         foreach (string name in oldByName.Keys.Intersect(newByName.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
         {
+            int start = results.Count;
             AddNumericDifference(
                 results,
                 ModelCompareObjectType.AreaProperty,
@@ -1211,24 +1262,31 @@ public sealed class ModelCompareService
                 newByName[name].Thickness,
                 settings.DimensionTolerance,
                 ModelCompareChangeImportance.High);
+            if (results.Count > start)
+                modified++;
         }
+
+        SummarizeDefinitionCategory(summary, oldByName.Keys, newByName.Keys, modified);
     }
 
     private static void CompareMaterials(
         IReadOnlyList<ModelCompareMaterialSnapshot> oldMaterials,
         IReadOnlyList<ModelCompareMaterialSnapshot> newMaterials,
         ModelCompareToleranceSettings settings,
-        List<ModelCompareResultRow> results)
+        List<ModelCompareResultRow> results,
+        ModelCompareCategorySummary summary)
     {
         Dictionary<string, ModelCompareMaterialSnapshot> oldByName = BuildUniqueLookup(oldMaterials, material => material.MaterialName);
         Dictionary<string, ModelCompareMaterialSnapshot> newByName = BuildUniqueLookup(newMaterials, material => material.MaterialName);
 
+        int modified = 0;
         foreach (string name in oldByName.Keys.Intersect(newByName.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
         {
             ModelCompareMaterialSnapshot oldMaterial = oldByName[name];
             ModelCompareMaterialSnapshot newMaterial = newByName[name];
             string description = $"Material '{name}'";
 
+            int start = results.Count;
             AddStringDifference(results, ModelCompareObjectType.Material, $"{description} / type", oldMaterial.MaterialType, newMaterial.MaterialType, ModelCompareChangeImportance.High);
             // Elastic modulus and unit weight are large numbers (E in MPa is ~30000), so an absolute tolerance
             // of a few thousandths flags unit-conversion rounding as a change. A relative tolerance, floored by
@@ -1236,14 +1294,36 @@ public sealed class ModelCompareService
             AddRelativeNumericDifference(results, ModelCompareObjectType.Material, $"{description} / elastic modulus", oldMaterial.ElasticModulus, newMaterial.ElasticModulus, settings.MaterialPropertyTolerance, MaterialRelativeTolerance, ModelCompareChangeImportance.High);
             AddNumericDifference(results, ModelCompareObjectType.Material, $"{description} / Poisson ratio", oldMaterial.PoissonRatio, newMaterial.PoissonRatio, settings.MaterialPropertyTolerance, ModelCompareChangeImportance.Medium);
             AddRelativeNumericDifference(results, ModelCompareObjectType.Material, $"{description} / unit weight", oldMaterial.UnitWeight, newMaterial.UnitWeight, settings.MaterialPropertyTolerance, MaterialRelativeTolerance, ModelCompareChangeImportance.Medium);
+            if (results.Count > start)
+                modified++;
         }
+
+        SummarizeDefinitionCategory(summary, oldByName.Keys, newByName.Keys, modified);
+    }
+
+    // Definition categories (materials, frame/area properties) match on name. Added/Removed come from the name
+    // sets; the caller supplies how many of the common names actually changed.
+    private static void SummarizeDefinitionCategory(
+        ModelCompareCategorySummary summary,
+        IEnumerable<string> oldNames,
+        IEnumerable<string> newNames,
+        int modifiedCount)
+    {
+        var oldSet = new HashSet<string>(oldNames, StringComparer.OrdinalIgnoreCase);
+        var newSet = new HashSet<string>(newNames, StringComparer.OrdinalIgnoreCase);
+        summary.Added = newSet.Count(name => !oldSet.Contains(name));
+        summary.Removed = oldSet.Count(name => !newSet.Contains(name));
+        int common = newSet.Count(name => oldSet.Contains(name));
+        summary.Modified = modifiedCount;
+        summary.Unchanged = common - modifiedCount;
     }
 
     private static void CompareJoints(
         IReadOnlyList<ModelCompareJointSnapshot> oldJoints,
         IReadOnlyList<ModelCompareJointSnapshot> newJoints,
         ModelCompareToleranceSettings settings,
-        List<ModelCompareResultRow> results)
+        List<ModelCompareResultRow> results,
+        ModelCompareCategorySummary summary)
     {
         List<ModelCompareJointSnapshot> orderedOld = oldJoints
             .OrderBy(joint => joint.PointName, StringComparer.OrdinalIgnoreCase)
@@ -1277,6 +1357,7 @@ public sealed class ModelCompareService
                     "",
                     ModelCompareChangeImportance.High));
                 ApplyJointNavigationContext(results, removedStart, oldJoint, null);
+                summary.Removed++;
                 continue;
             }
 
@@ -1291,6 +1372,7 @@ public sealed class ModelCompareService
                 DescribeRestraint(newJoint),
                 ModelCompareChangeImportance.High);
             ApplyJointNavigationContext(results, resultStart, oldJoint, newJoint);
+            TallyMatched(summary, resultStart, results.Count);
         }
 
         for (int index = 0; index < orderedNew.Count; index++)
@@ -1308,6 +1390,7 @@ public sealed class ModelCompareService
                 DescribeRestraint(newJoint),
                 ModelCompareChangeImportance.High));
             ApplyJointNavigationContext(results, addedStart, null, newJoint);
+            summary.Added++;
         }
     }
 

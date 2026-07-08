@@ -21,6 +21,20 @@ public sealed class ModelCompareComparisonResult
     public List<string> Warnings { get; set; } = [];
     public List<string> Errors { get; set; } = [];
     public bool FrameComparisonAvailable { get; set; } = true;
+
+    // Per-category outcome counts (added/removed/modified/unchanged/total), populated for each category that
+    // was actually compared. Drives the summary and the project-explorer tree; a category that was skipped or
+    // failed has no entry here.
+    public Dictionary<ModelCompareObjectType, ModelCompareCategorySummary> CategorySummaries { get; } = [];
+}
+
+public sealed class ModelCompareCategorySummary
+{
+    public int Added { get; set; }
+    public int Removed { get; set; }
+    public int Modified { get; set; }
+    public int Unchanged { get; set; }
+    public int Total => Added + Removed + Modified + Unchanged;
 }
 
 public enum ModelCompareChangeType
