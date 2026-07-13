@@ -67,7 +67,10 @@ public sealed class ParametricTrussValidator
         {
             string selectedSection = model.SectionAssignments.TryGetValue(group, out string? sectionName)
                 ? sectionName.Trim()
-                : "";
+                : model.Members
+                    .FirstOrDefault(member => string.Equals(member.Group, group, StringComparison.OrdinalIgnoreCase))
+                    ?.SectionName
+                    ?.Trim() ?? "";
 
             if (selectedSection.Length == 0)
             {
@@ -81,6 +84,16 @@ public sealed class ParametricTrussValidator
 
         foreach (ParametricMember member in model.Members)
         {
+            string memberSection = (member.SectionName ?? "").Trim();
+            if (memberSection.Length == 0)
+            {
+                Add(result, ValidationSeverity.Critical, $"Member '{member.Id}' has no frame section selected.");
+            }
+            else if (requireEtabsConnection && existingSections.Count > 0 && !existingSections.Contains(memberSection))
+            {
+                Add(result, ValidationSeverity.Critical, $"Selected frame section '{memberSection}' for member '{member.Id}' does not exist in the connected ETABS model.");
+            }
+
             if (!nodes.TryGetValue(member.StartNodeId, out ParametricNode? start))
                 Add(result, ValidationSeverity.Critical, $"Member '{member.Id}' references missing start node '{member.StartNodeId}'.");
 

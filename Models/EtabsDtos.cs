@@ -41,8 +41,22 @@ public sealed class EtabsParametricModelDataResult
     public List<string> LoadPatterns { get; set; } = [];
     public List<string> LoadCombinations { get; set; } = [];
     public List<string> Stories { get; set; } = [];
+    public List<EtabsStoryInfo> StoryInfos { get; set; } = [];
     public List<string> Groups { get; set; } = [];
     public List<string> Warnings { get; set; } = [];
+}
+
+public sealed class EtabsStoryInfo
+{
+    public string Name { get; set; } = "";
+    public double Elevation { get; set; }
+
+    public string DisplayName => $"{Name} ({Elevation:0.###} m)";
+
+    public override string ToString()
+    {
+        return DisplayName;
+    }
 }
 
 public sealed class EtabsSelectedInsertionPointsRequest
@@ -77,6 +91,7 @@ public sealed class EtabsTrussDrawRequest
     public ParametricTrussModel Model { get; set; } = new();
     public bool ReplaceExistingGroup { get; set; } = true;
     public bool AddAsNew { get; set; }
+    public EtabsTrussOverlapDrawMode OverlapDrawMode { get; set; } = EtabsTrussOverlapDrawMode.Current;
     public double OffsetX { get; set; }
     public double OffsetY { get; set; }
     public double OffsetZ { get; set; }
@@ -100,6 +115,51 @@ public sealed class GeneratedEtabsFrame
     public string EtabsFrameName { get; set; } = "";
     public string Group { get; set; } = "";
     public string SectionName { get; set; } = "";
+}
+
+public sealed class EtabsTrussCrashCheckRequest
+{
+    public string? EtabsInstanceId { get; set; }
+    public ParametricTrussModel Model { get; set; } = new();
+    public double Tolerance { get; set; } = 0.01;
+}
+
+public sealed class EtabsTrussCrashCheckResult
+{
+    public bool IsError { get; set; }
+    public string Message { get; set; } = "";
+    public List<EtabsTrussCrashRow> Crashes { get; set; } = [];
+    public List<string> Warnings { get; set; } = [];
+}
+
+public sealed class EtabsTrussCrashRow
+{
+    public string MemberId { get; set; } = "";
+    public string MemberGroup { get; set; } = "";
+    public string ExistingFrameName { get; set; } = "";
+    public string ExistingFrameLabel { get; set; } = "";
+    public string ExistingFrameStory { get; set; } = "";
+    public double OverlapLength { get; set; }
+    public double Distance { get; set; }
+
+    public string DisplayFrame => string.IsNullOrWhiteSpace(ExistingFrameLabel)
+        ? ExistingFrameName
+        : $"{ExistingFrameLabel} ({ExistingFrameName})";
+}
+
+public sealed class EtabsFrameSelectionRequest
+{
+    public string? EtabsInstanceId { get; set; }
+    public List<string> FrameNames { get; set; } = [];
+}
+
+public sealed class EtabsFrameSelectionResult
+{
+    public bool IsError { get; set; }
+    public string Message { get; set; } = "";
+    public int SelectedCount { get; set; }
+    public List<string> SelectedFrameNames { get; set; } = [];
+    public List<string> Warnings { get; set; } = [];
 }
 
 public sealed class EtabsFrameSectionImportRequest

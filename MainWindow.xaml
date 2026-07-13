@@ -131,6 +131,10 @@
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
                                         </Grid.RowDefinitions>
 
                                         <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Truss ID"/>
@@ -254,102 +258,127 @@
                                                     Margin="10,0,0,0"/>
                                         </Grid>
 
-                                        <TextBlock Grid.Row="9" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Generated"/>
-                                        <TextBlock Grid.Row="9" Grid.Column="1" Style="{StaticResource FieldValue}" Text="{Binding GeneratedCountDisplay}"/>
+                                        <TextBlock Grid.Row="9" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Orientation"
+                                                   Visibility="{Binding StandardTrussInputsVisibility}"/>
+                                        <Grid Grid.Row="9" Grid.Column="1"
+                                              Visibility="{Binding StandardTrussInputsVisibility}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="145"/>
+                                                <ColumnDefinition Width="70"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                            </Grid.ColumnDefinitions>
+                                            <ComboBox Grid.Column="0"
+                                                      ItemsSource="{Binding TrussOrientationOptions}"
+                                                      SelectedItem="{Binding SelectedTrussOrientation}"/>
+                                            <TextBox Grid.Column="1"
+                                                     Margin="8,0,0,0"
+                                                     Text="{Binding TrussAngleDegrees, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"
+                                                     IsEnabled="{Binding IsAngleInputEnabled}"/>
+                                            <TextBlock Grid.Column="2" Text="deg" Style="{StaticResource FieldLabel}" Margin="6,7,0,3"/>
+                                        </Grid>
 
-                                        <TextBlock Grid.Row="10" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Group"/>
-                                        <TextBox Grid.Row="10" Grid.Column="1" Text="{Binding GroupName, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <TextBlock Grid.Row="10" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Bottom-left X/Y"
+                                                   Visibility="{Binding StandardTrussInputsVisibility}"/>
+                                        <Grid Grid.Row="10" Grid.Column="1"
+                                              Visibility="{Binding StandardTrussInputsVisibility}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="72"/>
+                                                <ColumnDefinition Width="Auto"/>
+                                                <ColumnDefinition Width="72"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Text="X" Style="{StaticResource FieldLabel}" Margin="0,7,4,3"/>
+                                            <TextBox Grid.Column="1" Text="{Binding TrussBaseX, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
+                                            <TextBlock Grid.Column="2" Text="Y" Style="{StaticResource FieldLabel}" Margin="8,7,4,3"/>
+                                            <TextBox Grid.Column="3" Text="{Binding TrussBaseY, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
+                                        </Grid>
+
+                                        <TextBlock Grid.Row="11" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Top Z"
+                                                   Visibility="{Binding StandardTrussInputsVisibility}"/>
+                                        <Grid Grid.Row="11" Grid.Column="1"
+                                              Visibility="{Binding StandardTrussInputsVisibility}">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="130"/>
+                                                <ColumnDefinition Width="74"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <ComboBox Grid.Column="0"
+                                                      ItemsSource="{Binding TrussZReferenceOptions}"
+                                                      SelectedItem="{Binding SelectedTrussZReference}"
+                                                      MinWidth="0"/>
+                                            <TextBox Grid.Column="1"
+                                                     Margin="8,0,0,0"
+                                                     Text="{Binding TrussTopZ, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
+                                            <ComboBox Grid.Column="2"
+                                                      Margin="8,0,0,0"
+                                                      ItemsSource="{Binding Stories}"
+                                                      SelectedItem="{Binding SelectedTrussStory}"
+                                                      IsEnabled="{Binding IsStoryZEnabled}"
+                                                      MinWidth="0"/>
+                                        </Grid>
+
+                                        <TextBlock Grid.Row="12" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Preview colour"
+                                                   Visibility="{Binding StandardTrussInputsVisibility}"/>
+                                        <ComboBox Grid.Row="12" Grid.Column="1"
+                                                  ItemsSource="{Binding PreviewColorOptions}"
+                                                  SelectedItem="{Binding SelectedPreviewColor}"
+                                                  Visibility="{Binding StandardTrussInputsVisibility}"/>
+
+                                        <TextBlock Grid.Row="13" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Truss Spacing (to define number of truss)"
+                                                   Visibility="{Binding StandardTrussInputsVisibility}"/>
+                                        <TextBox Grid.Row="13" Grid.Column="1"
+                                                 Text="{Binding TrussSpacing, UpdateSourceTrigger=LostFocus}"
+                                                 Visibility="{Binding StandardTrussInputsVisibility}"/>
+
+                                        <TextBlock Grid.Row="14" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Spacing offset direction"
+                                                   Visibility="{Binding StandardTrussInputsVisibility}"/>
+                                        <ComboBox Grid.Row="14" Grid.Column="1"
+                                                  ItemsSource="{Binding TrussSpacingOffsetDirectionOptions}"
+                                                  SelectedItem="{Binding SelectedTrussSpacingOffsetDirection}"
+                                                  Visibility="{Binding StandardTrussInputsVisibility}"/>
+
+                                        <TextBlock Grid.Row="15" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Generated"/>
+                                        <TextBlock Grid.Row="15" Grid.Column="1" Style="{StaticResource FieldValue}" Text="{Binding GeneratedCountDisplay}"/>
+
+                                        <TextBlock Grid.Row="16" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Group"/>
+                                        <TextBox Grid.Row="16" Grid.Column="1" Text="{Binding GroupName, UpdateSourceTrigger=PropertyChanged}"/>
                                     </Grid>
                                 </GroupBox>
 
-                                <GroupBox Header="3D Bay Duplication" Visibility="{Binding StandardTrussInputsVisibility}">
+                                <GroupBox Header="Truss Parameters" Visibility="{Binding StandardTrussInputsVisibility}">
                                     <Grid>
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="145"/>
-                                            <ColumnDefinition Width="*"/>
-                                        </Grid.ColumnDefinitions>
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto"/>
-                                            <RowDefinition Height="Auto"/>
-                                            <RowDefinition Height="Auto"/>
-                                            <RowDefinition Height="Auto"/>
-                                            <RowDefinition Height="Auto"/>
-                                            <RowDefinition Height="Auto"/>
-                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="150"/>
                                         </Grid.RowDefinitions>
 
-                                        <controls:SliderNumberInput Grid.Row="0"
-                                                                    Grid.ColumnSpan="2"
-                                                                    Label="Y bay count"
-                                                                    Unit="nos"
-                                                                    Minimum="1"
-                                                                    Maximum="20"
-                                                                    SmallChange="1"
-                                                                    LargeChange="5"
-                                                                    IsInteger="True"
-                                                                    LiveTextUpdate="True"
-                                                                    Value="{Binding YBayCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                        <controls:SliderNumberInput Grid.Row="1"
-                                                                    Grid.ColumnSpan="2"
-                                                                    Label="Y bay spacing"
-                                                                    Unit="m"
-                                                                    Minimum="0.1"
-                                                                    Maximum="30"
-                                                                    SmallChange="0.05"
-                                                                    LargeChange="1"
-                                                                    DecimalPlaces="3"
-                                                                    LiveTextUpdate="True"
-                                                                    Value="{Binding YBaySpacing, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                        <TextBlock Grid.Row="2"
-                                                   Grid.Column="0"
-                                                   Style="{StaticResource FieldLabel}"
-                                                   Text="Y-Z trusses"/>
-                                        <CheckBox Grid.Row="2"
-                                                  Grid.Column="1"
-                                                  Content="Add orthogonal Y-Z trusses"
-                                                  IsChecked="{Binding GenerateOrthogonalYZTrusses}"
-                                                  VerticalAlignment="Center"/>
+                                        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+                                            <Button Content="+" Width="34" Command="{Binding AddTrussParameterCommand}"/>
+                                            <Button Content="Copy" Command="{Binding CopyTrussParameterCommand}" Margin="6,0,0,0"/>
+                                            <Button Content="-" Width="34" Command="{Binding RemoveTrussParameterCommand}" Margin="6,0,0,0"/>
+                                        </StackPanel>
 
-                                        <TextBlock Grid.Row="3"
-                                                   Grid.Column="0"
-                                                   Style="{StaticResource FieldLabel}"
-                                                   Text="Y-Z web pattern"/>
-                                        <ComboBox Grid.Row="3"
-                                                  Grid.Column="1"
-                                                  ItemsSource="{Binding OrthogonalYZTrussTypes}"
-                                                  SelectedItem="{Binding SelectedOrthogonalYZTrussType}"
-                                                  IsEnabled="{Binding GenerateOrthogonalYZTrusses}"/>
-
-                                        <controls:SliderNumberInput Grid.Row="4"
-                                                                    Grid.ColumnSpan="2"
-                                                                    Label="Y-Z panels / bay"
-                                                                    Unit="nos"
-                                                                    Minimum="1"
-                                                                    Maximum="20"
-                                                                    SmallChange="1"
-                                                                    LargeChange="5"
-                                                                    IsInteger="True"
-                                                                    LiveTextUpdate="True"
-                                                                    IsEnabled="{Binding GenerateOrthogonalYZTrusses}"
-                                                                    Value="{Binding OrthogonalYZPanelsPerBay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-
-                                        <TextBlock Grid.Row="5"
-                                                   Grid.Column="0"
-                                                   Style="{StaticResource FieldLabel}"
-                                                   Text="X placement"/>
-                                        <ComboBox Grid.Row="5"
-                                                  Grid.Column="1"
-                                                  ItemsSource="{Binding OrthogonalYZPlacementModes}"
-                                                  SelectedItem="{Binding SelectedOrthogonalYZPlacementMode}"
-                                                  IsEnabled="{Binding GenerateOrthogonalYZTrusses}"/>
-
-                                        <TextBlock Grid.Row="6"
-                                                   Grid.Column="0"
-                                                   Grid.ColumnSpan="2"
-                                                   Margin="0,6,0,2"
-                                                   Foreground="#64748B"
-                                                   TextWrapping="Wrap"
-                                                   Text="Count 1 keeps the original single X-Z truss. Y-Z trusses span each Y bay spacing, share matching X-Z chord joints at bay lines, and create internal panel nodes only inside that Y span."/>
+                                        <DataGrid Grid.Row="1"
+                                                  ItemsSource="{Binding TrussParameters}"
+                                                  SelectedItem="{Binding SelectedTrussParameter}"
+                                                  AutoGenerateColumns="False"
+                                                  IsReadOnly="True"
+                                                  CanUserAddRows="False"
+                                                  GridLinesVisibility="Horizontal"
+                                                  HeadersVisibility="Column"
+                                                  SelectionMode="Single"
+                                                  SelectionUnit="FullRow">
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="No." Binding="{Binding ParameterName}" Width="90"/>
+                                                <DataGridTextColumn Header="ID" Binding="{Binding TrussId}" Width="70"/>
+                                                <DataGridTextColumn Header="Type" Binding="{Binding TrussType}" Width="150"/>
+                                                <DataGridTextColumn Header="Coordinate" Binding="{Binding CoordinateDisplay}" Width="170"/>
+                                                <DataGridTextColumn Header="Orientation" Binding="{Binding OrientationDisplay}" Width="100"/>
+                                                <DataGridTextColumn Header="Colour" Binding="{Binding ColorDisplay}" Width="120"/>
+                                                <DataGridTextColumn Header="Spacing" Binding="{Binding TrussSpacingDisplay}" Width="95"/>
+                                                <DataGridTextColumn Header="Offset" Binding="{Binding TrussSpacingDirectionDisplay}" Width="120"/>
+                                            </DataGrid.Columns>
+                                        </DataGrid>
                                     </Grid>
                                 </GroupBox>
 
@@ -770,8 +799,12 @@
                                         <ComboBox Grid.Row="0" Grid.Column="1"
                                                   ItemsSource="{Binding EtabsExportModes}"
                                                   SelectedItem="{Binding SelectedEtabsExportMode}"/>
-                                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Add-new offset"/>
-                                        <Grid Grid.Row="1" Grid.Column="1">
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="ETABS overlap draw mode"/>
+                                        <ComboBox Grid.Row="1" Grid.Column="1"
+                                                  ItemsSource="{Binding EtabsTrussOverlapDrawModes}"
+                                                  SelectedItem="{Binding SelectedEtabsOverlapDrawMode}"/>
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Add-new offset"/>
+                                        <Grid Grid.Row="2" Grid.Column="1">
                                             <Grid.ColumnDefinitions>
                                                 <ColumnDefinition Width="Auto"/>
                                                 <ColumnDefinition Width="52"/>
@@ -793,24 +826,56 @@
                                                      MinWidth="0"
                                                      Text="{Binding AddAsNewOffsetZ, UpdateSourceTrigger=LostFocus, StringFormat=0.###}"/>
                                         </Grid>
-                                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Support nodes"
+                                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Support nodes"
                                                    Visibility="{Binding StandardSupportOptionsVisibility}"/>
-                                        <ComboBox Grid.Row="2" Grid.Column="1"
+                                        <ComboBox Grid.Row="3" Grid.Column="1"
                                                   ItemsSource="{Binding SupportNodeModes}"
                                                   SelectedItem="{Binding SelectedSupportNodeMode}"
                                                   MinWidth="0"
                                                   Visibility="{Binding StandardSupportOptionsVisibility}"/>
-                                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Support restraint"
+                                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Support restraint"
                                                    Visibility="{Binding StandardSupportOptionsVisibility}"/>
-                                        <ComboBox Grid.Row="3" Grid.Column="1"
+                                        <ComboBox Grid.Row="4" Grid.Column="1"
                                                   ItemsSource="{Binding SupportRestraintTypes}"
                                                   SelectedItem="{Binding SelectedSupportRestraintType}"
                                                   MinWidth="0"
                                                   Visibility="{Binding StandardSupportOptionsVisibility}"/>
-                                        <StackPanel Grid.Row="4" Grid.Column="1" Orientation="Horizontal" Margin="0,8,0,0">
+                                        <StackPanel Grid.Row="5" Grid.Column="1" Orientation="Horizontal" Margin="0,8,0,0">
                                             <Button Content="Validate" Command="{Binding ValidateCommand}"/>
                                             <Button Content="Send to ETABS" Command="{Binding SendToEtabsCommand}"/>
                                         </StackPanel>
+                                    </Grid>
+                                </GroupBox>
+
+                                <GroupBox Header="Crash Check" Visibility="{Binding StandardTrussInputsVisibility}">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="150"/>
+                                        </Grid.RowDefinitions>
+
+                                        <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,8">
+                                            <Button Content="Check Crash" Command="{Binding CheckTrussCrashesCommand}"/>
+                                            <Button Content="Select same frame in ETABS"
+                                                    Command="{Binding SelectCrashFramesInEtabsCommand}"
+                                                    Margin="8,0,0,0"/>
+                                        </StackPanel>
+
+                                        <DataGrid Grid.Row="1"
+                                                  ItemsSource="{Binding TrussCrashes}"
+                                                  SelectedItem="{Binding SelectedTrussCrash}"
+                                                  AutoGenerateColumns="False"
+                                                  IsReadOnly="True"
+                                                  CanUserAddRows="False"
+                                                  GridLinesVisibility="Horizontal"
+                                                  HeadersVisibility="Column">
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Truss member" Binding="{Binding MemberId}" Width="130"/>
+                                                <DataGridTextColumn Header="ETABS frame" Binding="{Binding DisplayFrame}" Width="150"/>
+                                                <DataGridTextColumn Header="Story" Binding="{Binding ExistingFrameStory}" Width="80"/>
+                                                <DataGridTextColumn Header="Overlap" Binding="{Binding OverlapLength, StringFormat=0.### m}" Width="80"/>
+                                            </DataGrid.Columns>
+                                        </DataGrid>
                                     </Grid>
                                 </GroupBox>
                             </StackPanel>

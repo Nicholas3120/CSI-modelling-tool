@@ -1,4 +1,5 @@
 using System.Collections.ObjectModel;
+using System.Globalization;
 using System.Windows;
 using System.Windows.Input;
 using CSIModellingTools.Features.IfcImport;
@@ -21,11 +22,24 @@ public sealed class ParametricModellingViewModel : ObservableObject
     private readonly ParametricTrussGenerator _generator = new();
     private readonly ParametricTrussValidator _validator = new();
     private bool _etabsDataLoaded;
+    private bool _syncingTrussParameterEditor;
+    private int _trussParameterCounter = 1;
     private EtabsInstanceInfo? _selectedEtabsInstance;
     private string _connectionStatus = "Not connected";
     private string _trussId = "TR01";
     private string _groupName = "WPF_TRUSS_TR01";
     private string _selectedTrussType = TrussType.Warren.ToString();
+    private TrussParameterItem? _selectedTrussParameter;
+    private string _selectedTrussOrientation = TrussOrientationLabels.Horizontal;
+    private double _trussAngleDegrees;
+    private double _trussBaseX;
+    private double _trussBaseY;
+    private double _trussTopZ;
+    private string _selectedTrussZReference = TrussZReferenceLabels.ManualCoordinate;
+    private string _selectedTrussStory = "";
+    private string _selectedPreviewColor = PreviewColorLabels.Blue;
+    private string _trussSpacing = "0";
+    private string _selectedTrussSpacingOffsetDirection = TrussSpacingOffsetDirectionLabels.AutoPerpendicular;
     private bool _useSelectedInsertionPoints;
     private double _manualSpan = 12.0;
     private double _height = 2.5;
@@ -119,6 +133,7 @@ public sealed class ParametricModellingViewModel : ObservableObject
     private double _loadPanelWidth = 1.0;
     private int _loadDefinitionCounter;
     private string _selectedEtabsExportMode = EtabsExportModeLabels.EraseAndRedraw;
+    private string _selectedEtabsOverlapDrawMode = EtabsTrussOverlapDrawModeLabels.Current;
     private string _selectedSupportNodeMode = SupportNodeModeLabels.EndBottomNodes;
     private string _selectedSupportRestraintType = SupportRestraintTypeLabels.FirstPinOthersRoller;
     private double _addAsNewOffsetX;
@@ -139,6 +154,7 @@ public sealed class ParametricModellingViewModel : ObservableObject
     private string _selectedSectionPreviewMode = SectionPreviewModeLabels.ThreeD;
     private EtabsFrameSectionRow? _selectedSectionEditorFrame;
     private ParametricTrussModel _currentModel = new();
+    private EtabsTrussCrashRow? _selectedTrussCrash;
 
     public ParametricModellingViewModel()
     {
@@ -165,15 +181,23 @@ public sealed class ParametricModellingViewModel : ObservableObject
         UpdateEtabsFrameLoadsCommand = new RelayCommand(_ => UpdateEtabsFrameLoads());
         CheckAllSectionRowsCommand = new RelayCommand(_ => SetSectionRowsChecked(true));
         UncheckAllSectionRowsCommand = new RelayCommand(_ => SetSectionRowsChecked(false));
+        AddTrussParameterCommand = new RelayCommand(_ => AddTrussParameter());
+        CopyTrussParameterCommand = new RelayCommand(_ => CopySelectedTrussParameter(), _ => SelectedTrussParameter != null);
+        RemoveTrussParameterCommand = new RelayCommand(_ => RemoveSelectedTrussParameter(), _ => TrussParameters.Count > 1 && SelectedTrussParameter != null);
         AddTrussLoadCommand = new RelayCommand(_ => AddTrussLoad());
         RemoveTrussLoadCommand = new RelayCommand(RemoveTrussLoad);
         ClearTrussLoadsCommand = new RelayCommand(_ => ClearTrussLoads(), _ => TrussLoads.Count > 0);
+        CheckTrussCrashesCommand = new RelayCommand(_ => CheckTrussCrashes());
+        SelectCrashFramesInEtabsCommand = new RelayCommand(_ => SelectCrashFramesInEtabs(), _ => TrussCrashes.Count > 0);
         TrussLoads.CollectionChanged += (_, _) =>
         {
             CommandManager.InvalidateRequerySuggested();
             RegeneratePreview();
         };
 
+        TrussParameterItem initialParameter = CaptureCurrentTrussParameter();
+        TrussParameters.Add(initialParameter);
+        SelectedTrussParameter = initialParameter;
         RegeneratePreview();
     }
 
@@ -190,10 +214,14 @@ public sealed class ParametricModellingViewModel : ObservableObject
     public IReadOnlyList<string> TrussTypes { get; } =
     [
         TrussType.Warren.ToString(),
+        TrussTypeLabels.WarrenNoVerticals,
+        TrussTypeLabels.InvertedWarren,
+        TrussTypeLabels.InvertedWarrenNoVerticals,
         TrussType.Pratt.ToString(),
         TrussType.Howe.ToString(),
         TrussType.K.ToString(),
-        TrussType.SimpleFrame.ToString(),
+        TrussTypeLabels.SimpleFrame,
+        TrussTypeLabels.LineFrameOnly,
         TrussTypeLabels.SpiralStaircase,
         TrussTypeLabels.FishBellyTruss,
         TrussTypeLabels.VariablePanelWidthTruss
@@ -202,10 +230,51 @@ public sealed class ParametricModellingViewModel : ObservableObject
     [
         OrthogonalYZTrussTypeLabels.SameAsXZ,
         TrussType.Warren.ToString(),
+        TrussTypeLabels.WarrenNoVerticals,
+        TrussTypeLabels.InvertedWarren,
+        TrussTypeLabels.InvertedWarrenNoVerticals,
         TrussType.Pratt.ToString(),
         TrussType.Howe.ToString(),
         TrussType.K.ToString(),
-        TrussType.SimpleFrame.ToString()
+        TrussTypeLabels.SimpleFrame,
+        TrussTypeLabels.LineFrameOnly
+    ];
+    public IReadOnlyList<string> TrussOrientationOptions { get; } =
+    [
+        TrussOrientationLabels.Horizontal,
+        TrussOrientationLabels.Vertical,
+        TrussOrientationLabels.AnyAngle
+    ];
+    public IReadOnlyList<string> TrussZReferenceOptions { get; } =
+    [
+        TrussZReferenceLabels.ManualCoordinate,
+        TrussZReferenceLabels.DefinedStory
+    ];
+    public IReadOnlyList<string> PreviewColorOptions { get; } =
+    [
+        PreviewColorLabels.Blue,
+        PreviewColorLabels.Green,
+        PreviewColorLabels.Red,
+        PreviewColorLabels.Orange,
+        PreviewColorLabels.Purple,
+        PreviewColorLabels.Slate,
+        PreviewColorLabels.Cyan,
+        PreviewColorLabels.Teal,
+        PreviewColorLabels.Lime,
+        PreviewColorLabels.Yellow,
+        PreviewColorLabels.Amber,
+        PreviewColorLabels.Indigo,
+        PreviewColorLabels.Pink,
+        PreviewColorLabels.Rose,
+        PreviewColorLabels.Brown,
+        PreviewColorLabels.Black
+    ];
+    public IReadOnlyList<string> TrussSpacingOffsetDirectionOptions { get; } =
+    [
+        TrussSpacingOffsetDirectionLabels.AutoPerpendicular,
+        TrussSpacingOffsetDirectionLabels.GlobalX,
+        TrussSpacingOffsetDirectionLabels.GlobalY,
+        TrussSpacingOffsetDirectionLabels.GlobalZ
     ];
     public IReadOnlyList<string> OrthogonalYZPlacementModes { get; } =
     [
@@ -254,6 +323,12 @@ public sealed class ParametricModellingViewModel : ObservableObject
         EtabsExportModeLabels.EraseAndRedraw,
         EtabsExportModeLabels.AddAsNew
     ];
+    public IReadOnlyList<string> EtabsTrussOverlapDrawModes { get; } =
+    [
+        EtabsTrussOverlapDrawModeLabels.Current,
+        EtabsTrussOverlapDrawModeLabels.ForceDuplicate,
+        EtabsTrussOverlapDrawModeLabels.SharedJoints
+    ];
     public IReadOnlyList<string> SupportNodeModes { get; } =
     [
         SupportNodeModeLabels.EndBottomNodes,
@@ -287,9 +362,12 @@ public sealed class ParametricModellingViewModel : ObservableObject
     public ObservableCollection<string> LoadPatterns { get; } = [];
     public ObservableCollection<string> LoadCombinations { get; } = [];
     public ObservableCollection<string> Stories { get; } = [];
+    public ObservableCollection<EtabsStoryInfo> StoryLevels { get; } = [];
     public ObservableCollection<string> Groups { get; } = [];
     public ObservableCollection<EtabsPointInfo> SelectedInsertionPoints { get; } = [];
     public ObservableCollection<ValidationIssue> Messages { get; } = [];
+    public ObservableCollection<TrussParameterItem> TrussParameters { get; } = [];
+    public ObservableCollection<EtabsTrussCrashRow> TrussCrashes { get; } = [];
     public ObservableCollection<ParametricTrussLoadDefinition> TrussLoads { get; } = [];
     public ObservableCollection<EtabsFrameSectionRow> SectionEditorFrames { get; } = [];
     public ObservableCollection<ValidationIssue> SectionEditorMessages { get; } = [];
@@ -313,9 +391,14 @@ public sealed class ParametricModellingViewModel : ObservableObject
     public ICommand UpdateEtabsFrameLoadsCommand { get; }
     public ICommand CheckAllSectionRowsCommand { get; }
     public ICommand UncheckAllSectionRowsCommand { get; }
+    public ICommand AddTrussParameterCommand { get; }
+    public ICommand CopyTrussParameterCommand { get; }
+    public ICommand RemoveTrussParameterCommand { get; }
     public ICommand AddTrussLoadCommand { get; }
     public ICommand RemoveTrussLoadCommand { get; }
     public ICommand ClearTrussLoadsCommand { get; }
+    public ICommand CheckTrussCrashesCommand { get; }
+    public ICommand SelectCrashFramesInEtabsCommand { get; }
 
     public EtabsInstanceInfo? SelectedEtabsInstance
     {
@@ -370,18 +453,153 @@ public sealed class ParametricModellingViewModel : ObservableObject
             if (SetProperty(ref _selectedTrussType, value))
             {
                 ApplyDefaultNameForSelectedType();
-                OnPropertyChanged(nameof(StandardTrussInputsVisibility));
-                OnPropertyChanged(nameof(SpiralInputsVisibility));
-                OnPropertyChanged(nameof(FishBellyInputsVisibility));
-                OnPropertyChanged(nameof(VariablePanelInputsVisibility));
-                OnPropertyChanged(nameof(StandardSectionsVisibility));
-                OnPropertyChanged(nameof(SpiralSectionsVisibility));
-                OnPropertyChanged(nameof(FishSectionsVisibility));
-                OnPropertyChanged(nameof(VariableSectionsVisibility));
-                OnPropertyChanged(nameof(LoadsVisibility));
-                OnPropertyChanged(nameof(StandardSupportOptionsVisibility));
+                NotifyTrussTypeVisibilityProperties();
                 RegeneratePreview();
             }
+        }
+    }
+
+    public TrussParameterItem? SelectedTrussParameter
+    {
+        get => _selectedTrussParameter;
+        set
+        {
+            if (ReferenceEquals(_selectedTrussParameter, value))
+                return;
+
+            SaveEditorToSelectedTrussParameter();
+            _selectedTrussParameter = value;
+            OnPropertyChanged();
+            LoadSelectedTrussParameterToEditor();
+            CommandManager.InvalidateRequerySuggested();
+        }
+    }
+
+    public string SelectedTrussOrientation
+    {
+        get => _selectedTrussOrientation;
+        set
+        {
+            string next = NormalizeTrussOrientation(value);
+            if (SetProperty(ref _selectedTrussOrientation, next))
+            {
+                OnPropertyChanged(nameof(IsAngleInputEnabled));
+                if (next == TrussOrientationLabels.Horizontal)
+                    TrussAngleDegrees = 0;
+                else if (next == TrussOrientationLabels.Vertical)
+                    TrussAngleDegrees = 90;
+                RegeneratePreview();
+            }
+        }
+    }
+
+    public bool IsAngleInputEnabled =>
+        string.Equals(SelectedTrussOrientation, TrussOrientationLabels.AnyAngle, StringComparison.OrdinalIgnoreCase);
+
+    public double TrussAngleDegrees
+    {
+        get => _trussAngleDegrees;
+        set
+        {
+            double next = double.IsFinite(value) ? value : 0.0;
+            if (SetProperty(ref _trussAngleDegrees, next))
+                RegeneratePreview();
+        }
+    }
+
+    public double TrussBaseX
+    {
+        get => _trussBaseX;
+        set
+        {
+            double next = double.IsFinite(value) ? RoundToGeometryStep(value) : 0.0;
+            if (SetProperty(ref _trussBaseX, next))
+                RegeneratePreview();
+        }
+    }
+
+    public double TrussBaseY
+    {
+        get => _trussBaseY;
+        set
+        {
+            double next = double.IsFinite(value) ? RoundToGeometryStep(value) : 0.0;
+            if (SetProperty(ref _trussBaseY, next))
+                RegeneratePreview();
+        }
+    }
+
+    public double TrussTopZ
+    {
+        get => _trussTopZ;
+        set
+        {
+            double next = double.IsFinite(value) ? RoundToGeometryStep(value) : 0.0;
+            if (SetProperty(ref _trussTopZ, next))
+                RegeneratePreview();
+        }
+    }
+
+    public string SelectedTrussZReference
+    {
+        get => _selectedTrussZReference;
+        set
+        {
+            string next = NormalizeTrussZReference(value);
+            if (SetProperty(ref _selectedTrussZReference, next))
+            {
+                OnPropertyChanged(nameof(IsStoryZEnabled));
+                ApplySelectedStoryElevation();
+                RegeneratePreview();
+            }
+        }
+    }
+
+    public bool IsStoryZEnabled =>
+        string.Equals(SelectedTrussZReference, TrussZReferenceLabels.DefinedStory, StringComparison.OrdinalIgnoreCase);
+
+    public string SelectedTrussStory
+    {
+        get => _selectedTrussStory;
+        set
+        {
+            if (SetProperty(ref _selectedTrussStory, value ?? ""))
+            {
+                ApplySelectedStoryElevation();
+                RegeneratePreview();
+            }
+        }
+    }
+
+    public string SelectedPreviewColor
+    {
+        get => _selectedPreviewColor;
+        set
+        {
+            if (SetProperty(ref _selectedPreviewColor, NormalizePreviewColorLabel(value)))
+                RegeneratePreview();
+        }
+    }
+
+    public string TrussSpacing
+    {
+        get => _trussSpacing;
+        set
+        {
+            string next = string.IsNullOrWhiteSpace(value) ? "0" : value.Trim();
+            if (SetProperty(ref _trussSpacing, next))
+                RegeneratePreview();
+        }
+    }
+
+    public string SelectedTrussSpacingOffsetDirection
+    {
+        get => _selectedTrussSpacingOffsetDirection;
+        set
+        {
+            string next = NormalizeTrussSpacingOffsetDirection(value);
+            if (SetProperty(ref _selectedTrussSpacingOffsetDirection, next))
+                RegeneratePreview();
         }
     }
 
@@ -868,6 +1086,12 @@ public sealed class ParametricModellingViewModel : ObservableObject
         set => SetProperty(ref _selectedEtabsExportMode, value ?? EtabsExportModeLabels.EraseAndRedraw);
     }
 
+    public string SelectedEtabsOverlapDrawMode
+    {
+        get => _selectedEtabsOverlapDrawMode;
+        set => SetProperty(ref _selectedEtabsOverlapDrawMode, NormalizeEtabsTrussOverlapDrawMode(value));
+    }
+
     public string SelectedSupportNodeMode
     {
         get => _selectedSupportNodeMode;
@@ -1041,6 +1265,12 @@ public sealed class ParametricModellingViewModel : ObservableObject
         set => SetProperty(ref _selectedSectionEditorFrame, value);
     }
 
+    public EtabsTrussCrashRow? SelectedTrussCrash
+    {
+        get => _selectedTrussCrash;
+        set => SetProperty(ref _selectedTrussCrash, value);
+    }
+
     public string SelectedInsertionSummary
     {
         get => _selectedInsertionSummary;
@@ -1093,6 +1323,7 @@ public sealed class ParametricModellingViewModel : ObservableObject
         ReplaceCollection(LoadPatterns, result.LoadPatterns);
         ReplaceCollection(LoadCombinations, result.LoadCombinations);
         ReplaceCollection(Stories, result.Stories);
+        ReplaceCollection(StoryLevels, result.StoryInfos);
         ReplaceCollection(Groups, result.Groups);
 
         _etabsDataLoaded = !result.IsError && (FrameSections.Count > 0 || ShellProperties.Count > 0);
@@ -1100,6 +1331,7 @@ public sealed class ParametricModellingViewModel : ObservableObject
         PickDefaultSections();
         PickDefaultSectionEditorGroup();
         PickDefaultLoadSelections();
+        PickDefaultTrussStory();
         ConnectionStatus = result.IsError ? "Not connected" : "Connected";
         ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
         RegeneratePreview();
@@ -1205,12 +1437,7 @@ public sealed class ParametricModellingViewModel : ObservableObject
 
     private void SendToEtabs()
     {
-        ParametricValidationResult validation = ValidateCurrentModel(true);
-        if (validation.HasCriticalIssues)
-        {
-            ConnectionStatus = "Validation failed";
-            return;
-        }
+        SaveEditorToSelectedTrussParameter();
 
         EtabsTrussDrawResult result = _etabsService.DrawOrUpdateTruss(new EtabsTrussDrawRequest
         {
@@ -1218,6 +1445,7 @@ public sealed class ParametricModellingViewModel : ObservableObject
             Model = CurrentModel,
             ReplaceExistingGroup = IsEraseAndRedrawMode,
             AddAsNew = IsAddAsNewMode,
+            OverlapDrawMode = ToEtabsTrussOverlapDrawMode(SelectedEtabsOverlapDrawMode),
             OffsetX = IsAddAsNewMode ? AddAsNewOffsetX : 0,
             OffsetY = IsAddAsNewMode ? AddAsNewOffsetY : 0,
             OffsetZ = IsAddAsNewMode ? AddAsNewOffsetZ : 0
@@ -1495,15 +1723,470 @@ public sealed class ParametricModellingViewModel : ObservableObject
         }
     }
 
+    private void AddTrussParameter()
+    {
+        SaveEditorToSelectedTrussParameter();
+        _trussParameterCounter++;
+        var parameter = CaptureCurrentTrussParameter();
+        parameter.ParameterName = $"Parameters {_trussParameterCounter}";
+        parameter.TrussId = BuildIndexedTrussId(_trussParameterCounter);
+        parameter.GroupName = EtabsNameUtility.BuildSafeName("WPF_TRUSS_", parameter.TrussId);
+        parameter.NotifyDisplayChanged();
+        TrussParameters.Add(parameter);
+        SelectedTrussParameter = parameter;
+        ShowMessages([], ValidationSeverity.Info, $"Added {parameter.ParameterName}.");
+    }
+
+    private void CopySelectedTrussParameter()
+    {
+        SaveEditorToSelectedTrussParameter();
+        if (SelectedTrussParameter == null)
+            return;
+
+        _trussParameterCounter++;
+        TrussParameterItem copy = SelectedTrussParameter.Clone();
+        copy.ParameterName = $"Parameters {_trussParameterCounter}";
+        copy.TrussId = BuildIndexedTrussId(_trussParameterCounter);
+        copy.GroupName = EtabsNameUtility.BuildSafeName("WPF_TRUSS_", copy.TrussId);
+        copy.BaseY += Math.Max(Height, 1.0);
+        copy.NotifyDisplayChanged();
+        TrussParameters.Add(copy);
+        SelectedTrussParameter = copy;
+        ShowMessages([], ValidationSeverity.Info, $"Copied current settings to {copy.ParameterName}. Adjust its coordinates/angle as needed.");
+    }
+
+    private void RemoveSelectedTrussParameter()
+    {
+        if (SelectedTrussParameter == null || TrussParameters.Count <= 1)
+            return;
+
+        int index = TrussParameters.IndexOf(SelectedTrussParameter);
+        TrussParameters.Remove(SelectedTrussParameter);
+        SelectedTrussParameter = TrussParameters[Math.Clamp(index, 0, TrussParameters.Count - 1)];
+        ShowMessages([], ValidationSeverity.Info, "Removed the selected truss parameter set.");
+        RegeneratePreview();
+    }
+
+    private TrussParameterItem CaptureCurrentTrussParameter()
+    {
+        return new TrussParameterItem
+        {
+            ParameterName = $"Parameters {_trussParameterCounter}",
+            TrussId = TrussId,
+            GroupName = GroupName,
+            TrussType = SelectedTrussType,
+            Span = ManualSpan,
+            Height = Height,
+            PanelCount = PanelCount,
+            BaseX = TrussBaseX,
+            BaseY = TrussBaseY,
+            TopZ = TrussTopZ,
+            ZReference = SelectedTrussZReference,
+            StoryName = SelectedTrussStory,
+            Orientation = SelectedTrussOrientation,
+            AngleDegrees = TrussAngleDegrees,
+            PreviewColor = SelectedPreviewColor,
+            TrussSpacing = TrussSpacing,
+            TrussSpacingOffsetDirection = SelectedTrussSpacingOffsetDirection,
+            RoofSlopePercent = RoofSlopePercent,
+            BottomChordSlopePercent = BottomChordSlopePercent,
+            TopChordSlopeMode = SelectedTopChordSlopeMode,
+            BottomChordSlopeMode = SelectedBottomChordSlopeMode,
+            TopChordSection = SelectedTopChordSection,
+            BottomChordSection = SelectedBottomChordSection,
+            DiagonalSection = SelectedDiagonalSection,
+            VerticalSection = SelectedVerticalSection,
+            EndPostSection = SelectedEndPostSection,
+            SecondarySection = SelectedSecondarySection
+        };
+    }
+
+    private void SaveEditorToSelectedTrussParameter()
+    {
+        if (_syncingTrussParameterEditor || SelectedTrussParameter == null || !IsStandardTrussType)
+            return;
+
+        TrussParameterItem parameter = SelectedTrussParameter;
+        parameter.TrussId = TrussId;
+        parameter.GroupName = GroupName;
+        parameter.TrussType = SelectedTrussType;
+        parameter.Span = ManualSpan;
+        parameter.Height = Height;
+        parameter.PanelCount = PanelCount;
+        parameter.BaseX = TrussBaseX;
+        parameter.BaseY = TrussBaseY;
+        parameter.TopZ = TrussTopZ;
+        parameter.ZReference = SelectedTrussZReference;
+        parameter.StoryName = SelectedTrussStory;
+        parameter.Orientation = SelectedTrussOrientation;
+        parameter.AngleDegrees = TrussAngleDegrees;
+        parameter.PreviewColor = SelectedPreviewColor;
+        parameter.TrussSpacing = TrussSpacing;
+        parameter.TrussSpacingOffsetDirection = SelectedTrussSpacingOffsetDirection;
+        parameter.RoofSlopePercent = RoofSlopePercent;
+        parameter.BottomChordSlopePercent = BottomChordSlopePercent;
+        parameter.TopChordSlopeMode = SelectedTopChordSlopeMode;
+        parameter.BottomChordSlopeMode = SelectedBottomChordSlopeMode;
+        parameter.TopChordSection = SelectedTopChordSection;
+        parameter.BottomChordSection = SelectedBottomChordSection;
+        parameter.DiagonalSection = SelectedDiagonalSection;
+        parameter.VerticalSection = SelectedVerticalSection;
+        parameter.EndPostSection = SelectedEndPostSection;
+        parameter.SecondarySection = SelectedSecondarySection;
+        parameter.NotifyDisplayChanged();
+    }
+
+    private void LoadSelectedTrussParameterToEditor()
+    {
+        if (SelectedTrussParameter == null)
+            return;
+
+        _syncingTrussParameterEditor = true;
+        TrussParameterItem parameter = SelectedTrussParameter;
+        _trussId = parameter.TrussId;
+        _groupName = parameter.GroupName;
+        _selectedTrussType = parameter.TrussType;
+        _manualSpan = parameter.Span;
+        _height = parameter.Height;
+        _panelCount = parameter.PanelCount;
+        _trussBaseX = parameter.BaseX;
+        _trussBaseY = parameter.BaseY;
+        _trussTopZ = parameter.TopZ;
+        _selectedTrussZReference = NormalizeTrussZReference(parameter.ZReference);
+        _selectedTrussStory = parameter.StoryName;
+        _selectedTrussOrientation = NormalizeTrussOrientation(parameter.Orientation);
+        _trussAngleDegrees = parameter.AngleDegrees;
+        _selectedPreviewColor = NormalizePreviewColorLabel(parameter.PreviewColor);
+        _trussSpacing = string.IsNullOrWhiteSpace(parameter.TrussSpacing) ? "0" : parameter.TrussSpacing;
+        _selectedTrussSpacingOffsetDirection = NormalizeTrussSpacingOffsetDirection(parameter.TrussSpacingOffsetDirection);
+        _roofSlopePercent = parameter.RoofSlopePercent;
+        _bottomChordSlopePercent = parameter.BottomChordSlopePercent;
+        _selectedTopChordSlopeMode = parameter.TopChordSlopeMode;
+        _selectedBottomChordSlopeMode = parameter.BottomChordSlopeMode;
+        _selectedTopChordSection = parameter.TopChordSection;
+        _selectedBottomChordSection = parameter.BottomChordSection;
+        _selectedDiagonalSection = parameter.DiagonalSection;
+        _selectedVerticalSection = parameter.VerticalSection;
+        _selectedEndPostSection = parameter.EndPostSection;
+        _selectedSecondarySection = parameter.SecondarySection;
+        _syncingTrussParameterEditor = false;
+
+        OnPropertyChanged(nameof(TrussId));
+        OnPropertyChanged(nameof(GroupName));
+        OnPropertyChanged(nameof(SelectedTrussType));
+        OnPropertyChanged(nameof(ManualSpan));
+        OnPropertyChanged(nameof(Height));
+        OnPropertyChanged(nameof(PanelCount));
+        OnPropertyChanged(nameof(TrussBaseX));
+        OnPropertyChanged(nameof(TrussBaseY));
+        OnPropertyChanged(nameof(TrussTopZ));
+        OnPropertyChanged(nameof(SelectedTrussZReference));
+        OnPropertyChanged(nameof(SelectedTrussStory));
+        OnPropertyChanged(nameof(SelectedTrussOrientation));
+        OnPropertyChanged(nameof(TrussAngleDegrees));
+        OnPropertyChanged(nameof(SelectedPreviewColor));
+        OnPropertyChanged(nameof(TrussSpacing));
+        OnPropertyChanged(nameof(SelectedTrussSpacingOffsetDirection));
+        OnPropertyChanged(nameof(RoofSlopePercent));
+        OnPropertyChanged(nameof(BottomChordSlopePercent));
+        OnPropertyChanged(nameof(SelectedTopChordSlopeMode));
+        OnPropertyChanged(nameof(SelectedBottomChordSlopeMode));
+        OnPropertyChanged(nameof(SelectedTopChordSection));
+        OnPropertyChanged(nameof(SelectedBottomChordSection));
+        OnPropertyChanged(nameof(SelectedDiagonalSection));
+        OnPropertyChanged(nameof(SelectedVerticalSection));
+        OnPropertyChanged(nameof(SelectedEndPostSection));
+        OnPropertyChanged(nameof(SelectedSecondarySection));
+        NotifyTrussTypeVisibilityProperties();
+        OnPropertyChanged(nameof(IsAngleInputEnabled));
+        OnPropertyChanged(nameof(IsStoryZEnabled));
+        RegeneratePreview();
+    }
+
+    private void CheckTrussCrashes()
+    {
+        SaveEditorToSelectedTrussParameter();
+        ParametricValidationResult validation = ValidateCurrentModel(true);
+        if (validation.HasCriticalIssues)
+        {
+            ConnectionStatus = "Crash check validation failed";
+            return;
+        }
+
+        EtabsTrussCrashCheckResult result = _etabsService.CheckTrussCrashes(new EtabsTrussCrashCheckRequest
+        {
+            EtabsInstanceId = SelectedEtabsInstanceId,
+            Model = CurrentModel,
+            Tolerance = 0.01
+        });
+
+        ReplaceCollection(TrussCrashes, result.Crashes);
+        SelectedTrussCrash = TrussCrashes.FirstOrDefault();
+        ConnectionStatus = result.IsError ? "Crash check failed" : "Crash check complete";
+        ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private void SelectCrashFramesInEtabs()
+    {
+        List<string> frameNames = TrussCrashes
+            .Select(crash => crash.ExistingFrameName)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (frameNames.Count == 0)
+        {
+            ShowMessages([], ValidationSeverity.Warning, "Run crash check first. No matching ETABS frame objects are available to select.");
+            return;
+        }
+
+        EtabsFrameSelectionResult result = _etabsService.SelectEtabsFrames(new EtabsFrameSelectionRequest
+        {
+            EtabsInstanceId = SelectedEtabsInstanceId,
+            FrameNames = frameNames
+        });
+
+        ConnectionStatus = result.IsError ? "Crash frame selection failed" : "Crash frames selected";
+        ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
+    }
+
     private void RegeneratePreview()
     {
-        ParametricTrussOptions options = BuildGeneratorOptions();
-        ParametricTrussModel model = _generator.Generate(options);
-        if (UseSelectedInsertionPoints && SelectedInsertionPoints.Count != 2)
+        if (!_syncingTrussParameterEditor)
+            SaveEditorToSelectedTrussParameter();
+
+        ParametricTrussModel model = IsStandardTrussType
+            ? BuildCombinedStandardTrussModel()
+            : _generator.Generate(BuildGeneratorOptions());
+
+        if (!IsStandardTrussType && UseSelectedInsertionPoints && SelectedInsertionPoints.Count != 2)
             model.Warnings.Add("Selected point insertion is enabled, but two ETABS insertion points have not been loaded.");
 
         CurrentModel = model;
+        TrussCrashes.Clear();
+        SelectedTrussCrash = null;
         ValidateCurrentModel(false);
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private ParametricTrussModel BuildCombinedStandardTrussModel()
+    {
+        List<TrussParameterItem> parameters = TrussParameters.Count == 0
+            ? [CaptureCurrentTrussParameter()]
+            : TrussParameters.ToList();
+
+        var generatedModels = parameters
+            .SelectMany(BuildSpacedStandardTrussModels)
+            .ToList();
+
+        if (generatedModels.Count == 1)
+            return generatedModels[0];
+
+        ParametricTrussModel first = generatedModels[0];
+        var combined = new ParametricTrussModel
+        {
+            TrussId = "MULTI_TRUSS",
+            GroupName = GroupName,
+            TrussType = first.TrussType,
+            PreviewColorHex = first.PreviewColorHex,
+            Span = generatedModels.Max(model => model.Span),
+            Height = generatedModels.Max(model => model.Height),
+            PanelCount = generatedModels.Sum(model => model.PanelCount),
+            SupportNodeMode = ToSupportNodeMode(SelectedSupportNodeMode),
+            SupportRestraintType = ToSupportRestraintType(SelectedSupportRestraintType),
+            SectionAssignments = BuildSectionAssignments()
+        };
+
+        foreach (ParametricTrussModel source in generatedModels)
+            AppendTrussModel(combined, source);
+
+        combined.Warnings.Add($"Preview/export combines {generatedModels.Count} generated truss instance(s) from {parameters.Count} parameter set(s).");
+        return combined;
+    }
+
+    private IEnumerable<ParametricTrussModel> BuildSpacedStandardTrussModels(TrussParameterItem parameter)
+    {
+        List<double> offsets = BuildTrussSpacingOffsets(parameter.TrussSpacing);
+        (double offsetX, double offsetY, double offsetZ) = BuildTrussSpacingOffsetVector(parameter);
+        for (int index = 0; index < offsets.Count; index++)
+        {
+            TrussParameterItem spacedParameter = parameter.Clone();
+            if (index > 0)
+            {
+                spacedParameter.TrussId = BuildSpacedTrussId(parameter.TrussId, index + 1);
+                spacedParameter.BaseX += offsetX * offsets[index];
+                spacedParameter.BaseY += offsetY * offsets[index];
+                spacedParameter.TopZ += offsetZ * offsets[index];
+            }
+
+            ParametricTrussModel model = _generator.Generate(BuildStandardGeneratorOptions(spacedParameter));
+            if (offsets.Count > 1)
+            {
+                model.YBayCount = offsets.Count;
+                model.YBaySpacing = offsets[index];
+                if (index > 0)
+                    model.Warnings.Add($"Generated from truss spacing '{parameter.TrussSpacing}' at cumulative Y offset {offsets[index]:0.###} m.");
+            }
+
+            yield return model;
+        }
+    }
+
+    private static void AppendTrussModel(ParametricTrussModel target, ParametricTrussModel source)
+    {
+        string prefix = EtabsNameUtility.BuildSafeName("", source.TrussId, 24);
+        var nodeMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var memberMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (ParametricNode node in source.Nodes)
+        {
+            string newNodeId = EtabsNameUtility.BuildSafeName("", $"{prefix}_{node.Id}", 60);
+            nodeMap[node.Id] = newNodeId;
+            target.Nodes.Add(new ParametricNode
+            {
+                Id = newNodeId,
+                X = node.X,
+                Y = node.Y,
+                Z = node.Z,
+                PreviewX = node.PreviewX,
+                PreviewZ = node.PreviewZ,
+                IsSupport = node.IsSupport,
+                IsTopChord = node.IsTopChord,
+                IsBottomChord = node.IsBottomChord,
+                SupportGroupId = string.IsNullOrWhiteSpace(node.SupportGroupId)
+                    ? prefix
+                    : $"{prefix}_{node.SupportGroupId}"
+            });
+        }
+
+        foreach (ParametricMember member in source.Members)
+        {
+            if (!nodeMap.TryGetValue(member.StartNodeId, out string? startNodeId) ||
+                !nodeMap.TryGetValue(member.EndNodeId, out string? endNodeId))
+            {
+                target.Warnings.Add($"Skipped merged member '{member.Id}': node reference could not be mapped.");
+                continue;
+            }
+
+            string newMemberId = EtabsNameUtility.BuildSafeName("", $"{prefix}_{member.Id}", 60);
+            memberMap[member.Id] = newMemberId;
+
+            target.Members.Add(new ParametricMember
+            {
+                Id = newMemberId,
+                StartNodeId = startNodeId,
+                EndNodeId = endNodeId,
+                Group = member.Group,
+                SectionName = member.SectionName,
+                PreviewColorHex = member.PreviewColorHex,
+                ReleaseMoments = member.ReleaseMoments
+            });
+        }
+
+        foreach (ParametricShell shell in source.Shells)
+        {
+            target.Shells.Add(new ParametricShell
+            {
+                Id = EtabsNameUtility.BuildSafeName("", $"{prefix}_{shell.Id}", 60),
+                Group = shell.Group,
+                ShellPropertyName = shell.ShellPropertyName,
+                NodeIds = shell.NodeIds
+                    .Where(nodeMap.ContainsKey)
+                    .Select(nodeId => nodeMap[nodeId])
+                    .ToList()
+            });
+        }
+
+        foreach (ParametricLoad load in source.Loads)
+        {
+            if (load.TargetType.Equals("MemberGroup", StringComparison.OrdinalIgnoreCase))
+            {
+                int loadIndex = 1;
+                foreach (ParametricMember member in source.Members.Where(member => string.Equals(member.Group, load.TargetId, StringComparison.OrdinalIgnoreCase)))
+                {
+                    if (!memberMap.TryGetValue(member.Id, out string? mappedMemberId))
+                        continue;
+
+                    target.Loads.Add(new ParametricLoad
+                    {
+                        Id = EtabsNameUtility.BuildSafeName("", $"{prefix}_{load.Id}_{loadIndex:000}", 60),
+                        LoadPattern = load.LoadPattern,
+                        TargetType = "Member",
+                        TargetId = mappedMemberId,
+                        Direction = load.Direction,
+                        Magnitude = load.Magnitude
+                    });
+                    loadIndex++;
+                }
+
+                continue;
+            }
+
+            string targetId = load.TargetType.Equals("Node", StringComparison.OrdinalIgnoreCase) &&
+                nodeMap.TryGetValue(load.TargetId, out string? mappedNodeId)
+                ? mappedNodeId
+                : load.TargetId;
+
+            target.Loads.Add(new ParametricLoad
+            {
+                Id = EtabsNameUtility.BuildSafeName("", $"{prefix}_{load.Id}", 60),
+                LoadPattern = load.LoadPattern,
+                TargetType = load.TargetType,
+                TargetId = targetId,
+                Direction = load.Direction,
+                Magnitude = load.Magnitude
+            });
+        }
+
+        target.Warnings.AddRange(source.Warnings);
+    }
+
+    private ParametricTrussOptions BuildStandardGeneratorOptions(TrussParameterItem parameter)
+    {
+        TrussType trussType = ToTrussType(parameter.TrussType);
+        double span = Math.Max(0.001, parameter.Span);
+        double height = trussType == TrussType.LineFrameOnly ? 0 : Math.Max(0.001, parameter.Height);
+        double angle = ResolveTrussAngleDegrees(parameter.Orientation, parameter.AngleDegrees);
+        double radians = angle * Math.PI / 180.0;
+        double startZ = trussType == TrussType.LineFrameOnly ? parameter.TopZ : parameter.TopZ - height;
+        var start = new ModelPoint3d
+        {
+            X = parameter.BaseX,
+            Y = parameter.BaseY,
+            Z = startZ
+        };
+        var end = new ModelPoint3d
+        {
+            X = parameter.BaseX + span * Math.Cos(radians),
+            Y = parameter.BaseY + span * Math.Sin(radians),
+            Z = startZ
+        };
+
+        return new ParametricTrussOptions
+        {
+            TrussId = parameter.TrussId,
+            GroupName = parameter.GroupName,
+            TrussType = trussType,
+            PreviewColorHex = ExtractPreviewColorHex(parameter.PreviewColor),
+            StartPoint = start,
+            EndPoint = end,
+            Height = height,
+            PanelCount = parameter.PanelCount,
+            YBayCount = 1,
+            YBaySpacing = 1,
+            GenerateOrthogonalYZTrusses = false,
+            RoofSlopePercent = parameter.RoofSlopePercent,
+            BottomChordSlopePercent = parameter.BottomChordSlopePercent,
+            TopChordSlopeMode = Enum.TryParse(parameter.TopChordSlopeMode, out ChordSlopeMode topSlopeMode) ? topSlopeMode : ChordSlopeMode.Pitch,
+            BottomChordSlopeMode = Enum.TryParse(parameter.BottomChordSlopeMode, out ChordSlopeMode bottomSlopeMode) ? bottomSlopeMode : ChordSlopeMode.Pitch,
+            SupportNodeMode = ToSupportNodeMode(SelectedSupportNodeMode),
+            SupportRestraintType = ToSupportRestraintType(SelectedSupportRestraintType),
+            SectionAssignments = BuildStandardSectionAssignments(parameter),
+            ApplyTopChordLoad = false,
+            ApplyBottomChordLoad = false,
+            LoadDefinitions = TrussLoads.Select(load => load.Clone()).ToList()
+        };
     }
 
     private ParametricTrussOptions BuildGeneratorOptions()
@@ -1665,6 +2348,19 @@ public sealed class ParametricModellingViewModel : ObservableObject
         return assignments;
     }
 
+    private static Dictionary<string, string> BuildStandardSectionAssignments(TrussParameterItem parameter)
+    {
+        return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+        {
+            [ParametricMemberGroups.TopChord] = parameter.TopChordSection,
+            [ParametricMemberGroups.BottomChord] = parameter.BottomChordSection,
+            [ParametricMemberGroups.Diagonal] = parameter.DiagonalSection,
+            [ParametricMemberGroups.Vertical] = parameter.VerticalSection,
+            [ParametricMemberGroups.EndPost] = parameter.EndPostSection,
+            [ParametricMemberGroups.Secondary] = parameter.SecondarySection
+        };
+    }
+
     private void PickDefaultSections()
     {
         string firstSection = FrameSections.FirstOrDefault() ?? "";
@@ -1737,6 +2433,236 @@ public sealed class ParametricModellingViewModel : ObservableObject
             SelectedLoadPattern = LoadPatterns.FirstOrDefault() ?? "";
         if (SectionEditorLoadPattern.Length == 0 || !LoadPatterns.Contains(SectionEditorLoadPattern))
             SectionEditorLoadPattern = LoadPatterns.FirstOrDefault() ?? "";
+    }
+
+    private void PickDefaultTrussStory()
+    {
+        if (SelectedTrussStory.Length > 0 && Stories.Contains(SelectedTrussStory))
+        {
+            ApplySelectedStoryElevation();
+            return;
+        }
+
+        SelectedTrussStory = StoryLevels.FirstOrDefault()?.Name ?? Stories.FirstOrDefault() ?? "";
+    }
+
+    private void ApplySelectedStoryElevation()
+    {
+        if (!IsStoryZEnabled || SelectedTrussStory.Length == 0)
+            return;
+
+        EtabsStoryInfo? story = StoryLevels.FirstOrDefault(item =>
+            string.Equals(item.Name, SelectedTrussStory, StringComparison.OrdinalIgnoreCase));
+        if (story != null)
+            TrussTopZ = story.Elevation;
+    }
+
+    private void NotifyTrussTypeVisibilityProperties()
+    {
+        OnPropertyChanged(nameof(StandardTrussInputsVisibility));
+        OnPropertyChanged(nameof(SpiralInputsVisibility));
+        OnPropertyChanged(nameof(FishBellyInputsVisibility));
+        OnPropertyChanged(nameof(VariablePanelInputsVisibility));
+        OnPropertyChanged(nameof(StandardSectionsVisibility));
+        OnPropertyChanged(nameof(SpiralSectionsVisibility));
+        OnPropertyChanged(nameof(FishSectionsVisibility));
+        OnPropertyChanged(nameof(VariableSectionsVisibility));
+        OnPropertyChanged(nameof(LoadsVisibility));
+        OnPropertyChanged(nameof(StandardSupportOptionsVisibility));
+    }
+
+    private static string NormalizeTrussOrientation(string? value)
+    {
+        if (string.Equals(value, TrussOrientationLabels.Vertical, StringComparison.OrdinalIgnoreCase))
+            return TrussOrientationLabels.Vertical;
+        if (string.Equals(value, TrussOrientationLabels.AnyAngle, StringComparison.OrdinalIgnoreCase))
+            return TrussOrientationLabels.AnyAngle;
+
+        return TrussOrientationLabels.Horizontal;
+    }
+
+    private static string NormalizeTrussZReference(string? value)
+    {
+        return string.Equals(value, TrussZReferenceLabels.DefinedStory, StringComparison.OrdinalIgnoreCase)
+            ? TrussZReferenceLabels.DefinedStory
+            : TrussZReferenceLabels.ManualCoordinate;
+    }
+
+    private static string NormalizeTrussSpacingOffsetDirection(string? value)
+    {
+        string text = (value ?? "").Trim();
+        if (string.Equals(text, TrussSpacingOffsetDirectionLabels.GlobalX, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(text, "X", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(text, "Global X", StringComparison.OrdinalIgnoreCase))
+            return TrussSpacingOffsetDirectionLabels.GlobalX;
+        if (string.Equals(text, TrussSpacingOffsetDirectionLabels.GlobalY, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(text, "Y", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(text, "Global Y", StringComparison.OrdinalIgnoreCase))
+            return TrussSpacingOffsetDirectionLabels.GlobalY;
+        if (string.Equals(text, TrussSpacingOffsetDirectionLabels.GlobalZ, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(text, "Z", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(text, "Global Z", StringComparison.OrdinalIgnoreCase))
+            return TrussSpacingOffsetDirectionLabels.GlobalZ;
+
+        return TrussSpacingOffsetDirectionLabels.AutoPerpendicular;
+    }
+
+    private static string NormalizeEtabsTrussOverlapDrawMode(string? value)
+    {
+        string text = (value ?? "").Trim();
+        if (string.Equals(text, EtabsTrussOverlapDrawModeLabels.ForceDuplicate, StringComparison.OrdinalIgnoreCase))
+            return EtabsTrussOverlapDrawModeLabels.ForceDuplicate;
+        if (string.Equals(text, EtabsTrussOverlapDrawModeLabels.SharedJoints, StringComparison.OrdinalIgnoreCase))
+            return EtabsTrussOverlapDrawModeLabels.SharedJoints;
+
+        return EtabsTrussOverlapDrawModeLabels.Current;
+    }
+
+    private static string NormalizePreviewColorLabel(string? value)
+    {
+        string text = (value ?? "").Trim();
+        if (text.Length == 0)
+            return PreviewColorLabels.Blue;
+
+        return text;
+    }
+
+    private static string ExtractPreviewColorHex(string? label)
+    {
+        string text = (label ?? "").Trim();
+        int hashIndex = text.IndexOf('#');
+        if (hashIndex >= 0 && text.Length >= hashIndex + 7)
+            text = text.Substring(hashIndex, 7);
+
+        if (!text.StartsWith("#", StringComparison.Ordinal))
+            text = "#" + text;
+
+        return text.Length == 7 && text[1..].All(Uri.IsHexDigit)
+            ? text.ToUpperInvariant()
+            : "#2563EB";
+    }
+
+    private static List<double> BuildTrussSpacingOffsets(string? spacingText)
+    {
+        var offsets = new List<double> { 0.0 };
+        string text = (spacingText ?? "").Trim();
+        if (text.Length == 0)
+            return offsets;
+
+        string[] parts = text.Split(';', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+            return offsets;
+
+        var spacings = new List<double>();
+        foreach (string part in parts)
+        {
+            if (double.TryParse(part, NumberStyles.Float, CultureInfo.CurrentCulture, out double currentCultureValue))
+            {
+                spacings.Add(currentCultureValue);
+                continue;
+            }
+
+            if (double.TryParse(part, NumberStyles.Float, CultureInfo.InvariantCulture, out double invariantValue))
+                spacings.Add(invariantValue);
+        }
+
+        int startIndex = spacings.Count > 0 && Math.Abs(spacings[0]) < 0.000001 ? 1 : 0;
+        double cumulativeOffset = 0.0;
+        for (int index = startIndex; index < spacings.Count; index++)
+        {
+            double spacing = spacings[index];
+            if (!double.IsFinite(spacing) || spacing <= 0.000001)
+                continue;
+
+            cumulativeOffset += spacing;
+            offsets.Add(cumulativeOffset);
+        }
+
+        return offsets;
+    }
+
+    private static (double X, double Y, double Z) BuildTrussSpacingOffsetVector(TrussParameterItem parameter)
+    {
+        TrussSpacingOffsetDirection direction = ToTrussSpacingOffsetDirection(parameter.TrussSpacingOffsetDirection);
+        return direction switch
+        {
+            TrussSpacingOffsetDirection.GlobalX => (1.0, 0.0, 0.0),
+            TrussSpacingOffsetDirection.GlobalY => (0.0, 1.0, 0.0),
+            TrussSpacingOffsetDirection.GlobalZ => (0.0, 0.0, 1.0),
+            _ => BuildAutoPerpendicularSpacingVector(parameter)
+        };
+    }
+
+    private static (double X, double Y, double Z) BuildAutoPerpendicularSpacingVector(TrussParameterItem parameter)
+    {
+        double angle = ResolveTrussAngleDegrees(parameter.Orientation, parameter.AngleDegrees);
+        double radians = angle * Math.PI / 180.0;
+        double x = -Math.Sin(radians);
+        double y = Math.Cos(radians);
+
+        if (Math.Abs(x) > Math.Abs(y))
+        {
+            if (x < 0)
+            {
+                x = -x;
+                y = -y;
+            }
+        }
+        else if (y < 0)
+        {
+            x = -x;
+            y = -y;
+        }
+
+        double length = Math.Sqrt(x * x + y * y);
+        return length <= 0.000001
+            ? (0.0, 1.0, 0.0)
+            : (x / length, y / length, 0.0);
+    }
+
+    private static TrussSpacingOffsetDirection ToTrussSpacingOffsetDirection(string? value)
+    {
+        string label = NormalizeTrussSpacingOffsetDirection(value);
+        if (string.Equals(label, TrussSpacingOffsetDirectionLabels.GlobalX, StringComparison.OrdinalIgnoreCase))
+            return TrussSpacingOffsetDirection.GlobalX;
+        if (string.Equals(label, TrussSpacingOffsetDirectionLabels.GlobalY, StringComparison.OrdinalIgnoreCase))
+            return TrussSpacingOffsetDirection.GlobalY;
+        if (string.Equals(label, TrussSpacingOffsetDirectionLabels.GlobalZ, StringComparison.OrdinalIgnoreCase))
+            return TrussSpacingOffsetDirection.GlobalZ;
+
+        return TrussSpacingOffsetDirection.AutoPerpendicular;
+    }
+
+    private static EtabsTrussOverlapDrawMode ToEtabsTrussOverlapDrawMode(string? value)
+    {
+        string label = NormalizeEtabsTrussOverlapDrawMode(value);
+        if (string.Equals(label, EtabsTrussOverlapDrawModeLabels.ForceDuplicate, StringComparison.OrdinalIgnoreCase))
+            return EtabsTrussOverlapDrawMode.ForceDuplicate;
+        if (string.Equals(label, EtabsTrussOverlapDrawModeLabels.SharedJoints, StringComparison.OrdinalIgnoreCase))
+            return EtabsTrussOverlapDrawMode.SharedJoints;
+
+        return EtabsTrussOverlapDrawMode.Current;
+    }
+
+    private static string BuildSpacedTrussId(string trussId, int instanceNumber)
+    {
+        string baseId = EtabsNameUtility.BuildSafeName("", trussId, 18);
+        return EtabsNameUtility.BuildSafeName("", $"{baseId}_S{Math.Max(1, instanceNumber):00}", 24);
+    }
+
+    private static double ResolveTrussAngleDegrees(string? orientation, double angleDegrees)
+    {
+        if (string.Equals(orientation, TrussOrientationLabels.Vertical, StringComparison.OrdinalIgnoreCase))
+            return 90.0;
+        if (string.Equals(orientation, TrussOrientationLabels.AnyAngle, StringComparison.OrdinalIgnoreCase))
+            return double.IsFinite(angleDegrees) ? angleDegrees : 0.0;
+
+        return 0.0;
+    }
+
+    private static string BuildIndexedTrussId(int index)
+    {
+        return $"TR{Math.Max(1, index):00}";
     }
 
     private static List<ValidationIssue> BuildIssues(IEnumerable<string> warnings, ValidationSeverity summarySeverity, string summary)
@@ -1953,6 +2879,20 @@ public sealed class ParametricModellingViewModel : ObservableObject
 
     private static TrussType ToTrussType(string? value)
     {
+        if (string.Equals(value, TrussTypeLabels.WarrenNoVerticals, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "WarrenNoVerticals", StringComparison.OrdinalIgnoreCase))
+            return TrussType.WarrenNoVerticals;
+        if (string.Equals(value, TrussTypeLabels.InvertedWarren, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "InvertedWarren", StringComparison.OrdinalIgnoreCase))
+            return TrussType.InvertedWarren;
+        if (string.Equals(value, TrussTypeLabels.InvertedWarrenNoVerticals, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "InvertedWarrenNoVerticals", StringComparison.OrdinalIgnoreCase))
+            return TrussType.InvertedWarrenNoVerticals;
+        if (string.Equals(value, TrussTypeLabels.SimpleFrame, StringComparison.OrdinalIgnoreCase))
+            return TrussType.SimpleFrame;
+        if (string.Equals(value, TrussTypeLabels.LineFrameOnly, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(value, "LineFrameOnly", StringComparison.OrdinalIgnoreCase))
+            return TrussType.LineFrameOnly;
         if (string.Equals(value, TrussTypeLabels.SpiralStaircase, StringComparison.OrdinalIgnoreCase))
             return TrussType.SpiralStaircase;
         if (string.Equals(value, TrussTypeLabels.FishBellyTruss, StringComparison.OrdinalIgnoreCase) ||
@@ -1979,7 +2919,11 @@ public sealed class ParametricModellingViewModel : ObservableObject
             TrussType.Pratt => TrussType.Pratt,
             TrussType.Howe => TrussType.Howe,
             TrussType.K => TrussType.K,
+            TrussType.WarrenNoVerticals => TrussType.WarrenNoVerticals,
+            TrussType.InvertedWarren => TrussType.InvertedWarren,
+            TrussType.InvertedWarrenNoVerticals => TrussType.InvertedWarrenNoVerticals,
             TrussType.SimpleFrame => TrussType.SimpleFrame,
+            TrussType.LineFrameOnly => TrussType.LineFrameOnly,
             _ => TrussType.Warren
         };
     }
@@ -2039,9 +2983,55 @@ public sealed class ParametricModellingViewModel : ObservableObject
 
     private static class TrussTypeLabels
     {
+        public const string WarrenNoVerticals = "Warren without vertical element";
+        public const string InvertedWarren = "Inverted Warren";
+        public const string InvertedWarrenNoVerticals = "Inverted Warren without vertical element";
+        public const string SimpleFrame = "Simple frame";
+        public const string LineFrameOnly = "Line frame only (not truss)";
         public const string SpiralStaircase = "Spiral Staircase";
         public const string FishBellyTruss = "Fish-Belly Truss";
         public const string VariablePanelWidthTruss = "Variable Panel Width Truss";
+    }
+
+    private static class TrussOrientationLabels
+    {
+        public const string Horizontal = "Horizontal";
+        public const string Vertical = "Vertical";
+        public const string AnyAngle = "Any angle";
+    }
+
+    private static class TrussZReferenceLabels
+    {
+        public const string ManualCoordinate = "Manual top Z";
+        public const string DefinedStory = "Defined story";
+    }
+
+    private static class PreviewColorLabels
+    {
+        public const string Blue = "Blue #2563EB";
+        public const string Green = "Green #059669";
+        public const string Red = "Red #DC2626";
+        public const string Orange = "Orange #EA580C";
+        public const string Purple = "Purple #7C3AED";
+        public const string Slate = "Slate #334155";
+        public const string Cyan = "Cyan #0891B2";
+        public const string Teal = "Teal #0D9488";
+        public const string Lime = "Lime #65A30D";
+        public const string Yellow = "Yellow #CA8A04";
+        public const string Amber = "Amber #D97706";
+        public const string Indigo = "Indigo #4F46E5";
+        public const string Pink = "Pink #DB2777";
+        public const string Rose = "Rose #E11D48";
+        public const string Brown = "Brown #92400E";
+        public const string Black = "Black #111827";
+    }
+
+    private static class TrussSpacingOffsetDirectionLabels
+    {
+        public const string AutoPerpendicular = "Auto perpendicular";
+        public const string GlobalX = "Global X";
+        public const string GlobalY = "Global Y";
+        public const string GlobalZ = "Global Z";
     }
 
     private static class OrthogonalYZTrussTypeLabels
@@ -2092,6 +3082,13 @@ public sealed class ParametricModellingViewModel : ObservableObject
         public const string AddAsNew = "Add as new";
     }
 
+    private static class EtabsTrussOverlapDrawModeLabels
+    {
+        public const string Current = "Option 1 - Current";
+        public const string ForceDuplicate = "Option 2 - Force draw overlaps";
+        public const string SharedJoints = "Option 3 - Share overlapping joints";
+    }
+
     private static class SupportNodeModeLabels
     {
         public const string EndBottomNodes = "End bottom nodes";
@@ -2110,5 +3107,96 @@ public sealed class ParametricModellingViewModel : ObservableObject
     {
         public const string ThreeD = "3D";
         public const string TwoD = "2D";
+    }
+}
+
+public sealed class TrussParameterItem : ObservableObject
+{
+    public string ParameterName { get; set; } = "Parameters 1";
+    public string TrussId { get; set; } = "TR01";
+    public string GroupName { get; set; } = "WPF_TRUSS_TR01";
+    public string TrussType { get; set; } = "Warren";
+    public double Span { get; set; } = 12.0;
+    public double Height { get; set; } = 2.5;
+    public int PanelCount { get; set; } = 6;
+    public double BaseX { get; set; }
+    public double BaseY { get; set; }
+    public double TopZ { get; set; }
+    public string ZReference { get; set; } = "Manual top Z";
+    public string StoryName { get; set; } = "";
+    public string Orientation { get; set; } = "Horizontal";
+    public double AngleDegrees { get; set; }
+    public string PreviewColor { get; set; } = "Blue #2563EB";
+    public string TrussSpacing { get; set; } = "0";
+    public string TrussSpacingOffsetDirection { get; set; } = "Auto perpendicular";
+    public double RoofSlopePercent { get; set; }
+    public double BottomChordSlopePercent { get; set; }
+    public string TopChordSlopeMode { get; set; } = ChordSlopeMode.Pitch.ToString();
+    public string BottomChordSlopeMode { get; set; } = ChordSlopeMode.Pitch.ToString();
+    public string TopChordSection { get; set; } = "";
+    public string BottomChordSection { get; set; } = "";
+    public string DiagonalSection { get; set; } = "";
+    public string VerticalSection { get; set; } = "";
+    public string EndPostSection { get; set; } = "";
+    public string SecondarySection { get; set; } = "";
+
+    public string CoordinateDisplay => $"X {BaseX:0.###}, Y {BaseY:0.###}, top Z {TopZ:0.###}";
+
+    public string OrientationDisplay => string.Equals(Orientation, "Any angle", StringComparison.OrdinalIgnoreCase)
+        ? $"{AngleDegrees:0.###} deg"
+        : Orientation;
+
+    public string ColorDisplay => PreviewColor;
+
+    public string TrussSpacingDisplay => string.IsNullOrWhiteSpace(TrussSpacing) ? "0" : TrussSpacing;
+
+    public string TrussSpacingDirectionDisplay => string.IsNullOrWhiteSpace(TrussSpacingOffsetDirection)
+        ? "Auto perpendicular"
+        : TrussSpacingOffsetDirection;
+
+    public TrussParameterItem Clone()
+    {
+        return new TrussParameterItem
+        {
+            ParameterName = ParameterName,
+            TrussId = TrussId,
+            GroupName = GroupName,
+            TrussType = TrussType,
+            Span = Span,
+            Height = Height,
+            PanelCount = PanelCount,
+            BaseX = BaseX,
+            BaseY = BaseY,
+            TopZ = TopZ,
+            ZReference = ZReference,
+            StoryName = StoryName,
+            Orientation = Orientation,
+            AngleDegrees = AngleDegrees,
+            PreviewColor = PreviewColor,
+            TrussSpacing = TrussSpacing,
+            TrussSpacingOffsetDirection = TrussSpacingOffsetDirection,
+            RoofSlopePercent = RoofSlopePercent,
+            BottomChordSlopePercent = BottomChordSlopePercent,
+            TopChordSlopeMode = TopChordSlopeMode,
+            BottomChordSlopeMode = BottomChordSlopeMode,
+            TopChordSection = TopChordSection,
+            BottomChordSection = BottomChordSection,
+            DiagonalSection = DiagonalSection,
+            VerticalSection = VerticalSection,
+            EndPostSection = EndPostSection,
+            SecondarySection = SecondarySection
+        };
+    }
+
+    public void NotifyDisplayChanged()
+    {
+        OnPropertyChanged(nameof(ParameterName));
+        OnPropertyChanged(nameof(TrussId));
+        OnPropertyChanged(nameof(TrussType));
+        OnPropertyChanged(nameof(CoordinateDisplay));
+        OnPropertyChanged(nameof(OrientationDisplay));
+        OnPropertyChanged(nameof(ColorDisplay));
+        OnPropertyChanged(nameof(TrussSpacingDisplay));
+        OnPropertyChanged(nameof(TrussSpacingDirectionDisplay));
     }
 }

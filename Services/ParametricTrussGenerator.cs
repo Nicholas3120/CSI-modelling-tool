@@ -7,6 +7,7 @@ public sealed class ParametricTrussOptions
     public string TrussId { get; set; } = "TR01";
     public string GroupName { get; set; } = "";
     public TrussType TrussType { get; set; } = TrussType.Warren;
+    public string PreviewColorHex { get; set; } = "#2563EB";
     public ModelPoint3d StartPoint { get; set; } = new();
     public ModelPoint3d EndPoint { get; set; } = new() { X = 12 };
     public double Height { get; set; } = 2.5;
@@ -115,6 +116,7 @@ public sealed class ParametricTrussGenerator
             TrussId = trussId,
             GroupName = BuildGroupName(options.GroupName, "WPF_TRUSS_", trussId),
             TrussType = options.TrussType,
+            PreviewColorHex = NormalizePreviewColor(options.PreviewColorHex),
             Span = span,
             Height = height,
             PanelCount = panelCount,
@@ -136,6 +138,38 @@ public sealed class ParametricTrussGenerator
         };
 
         var nodesById = new Dictionary<string, ParametricNode>(StringComparer.OrdinalIgnoreCase);
+        if (options.TrussType == TrussType.LineFrameOnly)
+        {
+            for (int index = 0; index <= panelCount; index++)
+            {
+                double t = (double)index / panelCount;
+                double localX = span * t;
+                ModelPoint3d basePoint = ModelPoint3d.Interpolate(start, end, t);
+                double topChordRise = CalculateSlopeRise(span, t, options.RoofSlopePercent, options.TopChordSlopeMode);
+
+                AddNode(model, nodesById, new ParametricNode
+                {
+                    Id = TopNodeId(index),
+                    X = basePoint.X,
+                    Y = basePoint.Y,
+                    Z = basePoint.Z + topChordRise,
+                    PreviewX = localX,
+                    PreviewZ = topChordRise,
+                    IsSupport = IsSupportNode(index, panelCount, options.SupportNodeMode),
+                    IsTopChord = true
+                });
+            }
+
+            model.Height = Math.Max(0.001, Math.Abs(model.Nodes.Max(node => node.PreviewZ) - model.Nodes.Min(node => node.PreviewZ)));
+            var lineCounters = ParametricMemberGroups.All.ToDictionary(group => group, _ => 0, StringComparer.OrdinalIgnoreCase);
+            for (int index = 0; index < panelCount; index++)
+                AddMember(model, trussId, ParametricMemberGroups.TopChord, TopNodeId(index), TopNodeId(index + 1), lineCounters, previewColorHex: model.PreviewColorHex);
+
+            AssignMemberSections(model);
+            AddLoads(model, options);
+            return model;
+        }
+
         for (int index = 0; index <= panelCount; index++)
         {
             double t = (double)index / panelCount;
@@ -176,17 +210,17 @@ public sealed class ParametricTrussGenerator
 
         for (int index = 0; index < panelCount; index++)
         {
-            AddMember(model, trussId, ParametricMemberGroups.BottomChord, BottomNodeId(index), BottomNodeId(index + 1), counters);
-            AddMember(model, trussId, ParametricMemberGroups.TopChord, TopNodeId(index), TopNodeId(index + 1), counters);
+            AddMember(model, trussId, ParametricMemberGroups.BottomChord, BottomNodeId(index), BottomNodeId(index + 1), counters, previewColorHex: model.PreviewColorHex);
+            AddMember(model, trussId, ParametricMemberGroups.TopChord, TopNodeId(index), TopNodeId(index + 1), counters, previewColorHex: model.PreviewColorHex);
         }
 
-        AddMember(model, trussId, ParametricMemberGroups.EndPost, BottomNodeId(0), TopNodeId(0), counters);
-        AddMember(model, trussId, ParametricMemberGroups.EndPost, BottomNodeId(panelCount), TopNodeId(panelCount), counters);
+        AddMember(model, trussId, ParametricMemberGroups.EndPost, BottomNodeId(0), TopNodeId(0), counters, previewColorHex: model.PreviewColorHex);
+        AddMember(model, trussId, ParametricMemberGroups.EndPost, BottomNodeId(panelCount), TopNodeId(panelCount), counters, previewColorHex: model.PreviewColorHex);
 
         if (options.TrussType == TrussType.K)
         {
             for (int index = 1; index < panelCount; index++)
-                AddMember(model, trussId, ParametricMemberGroups.Vertical, BottomNodeId(index), TopNodeId(index), counters);
+                AddMember(model, trussId, ParametricMemberGroups.Vertical, BottomNodeId(index), TopNodeId(index), counters, previewColorHex: model.PreviewColorHex);
 
             for (int index = 0; index < panelCount; index++)
             {
@@ -206,36 +240,27 @@ public sealed class ParametricTrussGenerator
                     PreviewZ = (leftBottom.PreviewZ + leftTop.PreviewZ + rightBottom.PreviewZ + rightTop.PreviewZ) / 4.0
                 });
 
-                AddMember(model, trussId, ParametricMemberGroups.Diagonal, BottomNodeId(index), midNodeId, counters);
-                AddMember(model, trussId, ParametricMemberGroups.Diagonal, TopNodeId(index), midNodeId, counters);
-                AddMember(model, trussId, ParametricMemberGroups.Diagonal, midNodeId, BottomNodeId(index + 1), counters);
-                AddMember(model, trussId, ParametricMemberGroups.Diagonal, midNodeId, TopNodeId(index + 1), counters);
+                AddMember(model, trussId, ParametricMemberGroups.Diagonal, BottomNodeId(index), midNodeId, counters, previewColorHex: model.PreviewColorHex);
+                AddMember(model, trussId, ParametricMemberGroups.Diagonal, TopNodeId(index), midNodeId, counters, previewColorHex: model.PreviewColorHex);
+                AddMember(model, trussId, ParametricMemberGroups.Diagonal, midNodeId, BottomNodeId(index + 1), counters, previewColorHex: model.PreviewColorHex);
+                AddMember(model, trussId, ParametricMemberGroups.Diagonal, midNodeId, TopNodeId(index + 1), counters, previewColorHex: model.PreviewColorHex);
             }
         }
         else
         {
-            for (int index = 1; index < panelCount; index++)
-                AddMember(model, trussId, ParametricMemberGroups.Vertical, BottomNodeId(index), TopNodeId(index), counters);
+            if (ShouldAddStandardVerticals(options.TrussType))
+            {
+                for (int index = 1; index < panelCount; index++)
+                    AddMember(model, trussId, ParametricMemberGroups.Vertical, BottomNodeId(index), TopNodeId(index), counters, previewColorHex: model.PreviewColorHex);
+            }
 
             if (options.TrussType != TrussType.SimpleFrame)
             {
                 for (int index = 0; index < panelCount; index++)
                 {
-                    (string Start, string End) diagonal = options.TrussType switch
-                    {
-                        TrussType.Warren => index % 2 == 0
-                            ? (BottomNodeId(index), TopNodeId(index + 1))
-                            : (TopNodeId(index), BottomNodeId(index + 1)),
-                        TrussType.Pratt => index < panelCount / 2.0
-                            ? (BottomNodeId(index), TopNodeId(index + 1))
-                            : (TopNodeId(index), BottomNodeId(index + 1)),
-                        TrussType.Howe => index < panelCount / 2.0
-                            ? (TopNodeId(index), BottomNodeId(index + 1))
-                            : (BottomNodeId(index), TopNodeId(index + 1)),
-                        _ => (BottomNodeId(index), TopNodeId(index + 1))
-                    };
+                    (string Start, string End) diagonal = BuildStandardDiagonal(options.TrussType, index, panelCount);
 
-                    AddMember(model, trussId, ParametricMemberGroups.Diagonal, diagonal.Start, diagonal.End, counters);
+                    AddMember(model, trussId, ParametricMemberGroups.Diagonal, diagonal.Start, diagonal.End, counters, previewColorHex: model.PreviewColorHex);
                 }
             }
         }
@@ -474,7 +499,35 @@ public sealed class ParametricTrussGenerator
             EndNodeId = member.EndNodeId,
             Group = member.Group,
             SectionName = member.SectionName,
+            PreviewColorHex = member.PreviewColorHex,
             ReleaseMoments = member.ReleaseMoments
+        };
+    }
+
+    private static bool ShouldAddStandardVerticals(TrussType trussType)
+    {
+        return trussType is not TrussType.WarrenNoVerticals and
+            not TrussType.InvertedWarrenNoVerticals and
+            not TrussType.LineFrameOnly;
+    }
+
+    private static (string Start, string End) BuildStandardDiagonal(TrussType trussType, int index, int panelCount)
+    {
+        return trussType switch
+        {
+            TrussType.Warren or TrussType.WarrenNoVerticals => index % 2 == 0
+                ? (BottomNodeId(index), TopNodeId(index + 1))
+                : (TopNodeId(index), BottomNodeId(index + 1)),
+            TrussType.InvertedWarren or TrussType.InvertedWarrenNoVerticals => index % 2 == 0
+                ? (TopNodeId(index), BottomNodeId(index + 1))
+                : (BottomNodeId(index), TopNodeId(index + 1)),
+            TrussType.Pratt => index < panelCount / 2.0
+                ? (BottomNodeId(index), TopNodeId(index + 1))
+                : (TopNodeId(index), BottomNodeId(index + 1)),
+            TrussType.Howe => index < panelCount / 2.0
+                ? (TopNodeId(index), BottomNodeId(index + 1))
+                : (BottomNodeId(index), TopNodeId(index + 1)),
+            _ => (BottomNodeId(index), TopNodeId(index + 1))
         };
     }
 
@@ -622,15 +675,18 @@ public sealed class ParametricTrussGenerator
             }
             else
             {
-                for (int panelIndex = 1; panelIndex < yPanelCount; panelIndex++)
+                if (ShouldAddStandardVerticals(model.OrthogonalYZTrussType))
                 {
-                    AddMember(
-                        model,
-                        lineTrussId,
-                        ParametricMemberGroups.YZVertical,
-                        bottomNodeIds[panelIndex],
-                        topNodeIds[panelIndex],
-                        counters);
+                    for (int panelIndex = 1; panelIndex < yPanelCount; panelIndex++)
+                    {
+                        AddMember(
+                            model,
+                            lineTrussId,
+                            ParametricMemberGroups.YZVertical,
+                            bottomNodeIds[panelIndex],
+                            topNodeIds[panelIndex],
+                            counters);
+                    }
                 }
 
                 if (model.OrthogonalYZTrussType != TrussType.SimpleFrame)
@@ -639,9 +695,12 @@ public sealed class ParametricTrussGenerator
                     {
                         (string Start, string End) diagonal = model.OrthogonalYZTrussType switch
                         {
-                            TrussType.Warren => panelIndex % 2 == 0
+                            TrussType.Warren or TrussType.WarrenNoVerticals => panelIndex % 2 == 0
                                 ? (bottomNodeIds[panelIndex], topNodeIds[panelIndex + 1])
                                 : (topNodeIds[panelIndex], bottomNodeIds[panelIndex + 1]),
+                            TrussType.InvertedWarren or TrussType.InvertedWarrenNoVerticals => panelIndex % 2 == 0
+                                ? (topNodeIds[panelIndex], bottomNodeIds[panelIndex + 1])
+                                : (bottomNodeIds[panelIndex], topNodeIds[panelIndex + 1]),
                             TrussType.Pratt => panelIndex < yPanelCount / 2.0
                                 ? (bottomNodeIds[panelIndex], topNodeIds[panelIndex + 1])
                                 : (topNodeIds[panelIndex], bottomNodeIds[panelIndex + 1]),
@@ -805,7 +864,11 @@ public sealed class ParametricTrussGenerator
             TrussType.Pratt => TrussType.Pratt,
             TrussType.Howe => TrussType.Howe,
             TrussType.K => TrussType.K,
+            TrussType.WarrenNoVerticals => TrussType.WarrenNoVerticals,
+            TrussType.InvertedWarren => TrussType.InvertedWarren,
+            TrussType.InvertedWarrenNoVerticals => TrussType.InvertedWarrenNoVerticals,
             TrussType.SimpleFrame => TrussType.SimpleFrame,
+            TrussType.LineFrameOnly => TrussType.LineFrameOnly,
             _ => TrussType.Warren
         };
     }
@@ -1116,7 +1179,8 @@ public sealed class ParametricTrussGenerator
         string startNodeId,
         string endNodeId,
         Dictionary<string, int> counters,
-        bool releaseMoments = false)
+        bool releaseMoments = false,
+        string previewColorHex = "")
     {
         counters[group]++;
         model.Members.Add(new ParametricMember
@@ -1125,6 +1189,7 @@ public sealed class ParametricTrussGenerator
             Group = group,
             StartNodeId = startNodeId,
             EndNodeId = endNodeId,
+            PreviewColorHex = string.IsNullOrWhiteSpace(previewColorHex) ? model.PreviewColorHex : NormalizePreviewColor(previewColorHex),
             ReleaseMoments = releaseMoments
         });
     }
@@ -1178,6 +1243,21 @@ public sealed class ParametricTrussGenerator
     private static double DegreesToRadians(double degrees)
     {
         return degrees * Math.PI / 180.0;
+    }
+
+    private static string NormalizePreviewColor(string? value)
+    {
+        string text = (value ?? "").Trim();
+        if (text.Length == 0)
+            return "#2563EB";
+
+        if (!text.StartsWith("#", StringComparison.Ordinal))
+            text = "#" + text;
+
+        if (text.Length != 7)
+            return "#2563EB";
+
+        return text[1..].All(Uri.IsHexDigit) ? text.ToUpperInvariant() : "#2563EB";
     }
 
     private static double CalculateSlopeRise(double span, double t, double slopePercent, ChordSlopeMode slopeMode)

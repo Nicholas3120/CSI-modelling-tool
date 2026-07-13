@@ -5,10 +5,14 @@ namespace CSIModellingTools.Models;
 public enum TrussType
 {
     Warren,
+    WarrenNoVerticals,
+    InvertedWarren,
+    InvertedWarrenNoVerticals,
     Pratt,
     Howe,
     K,
     SimpleFrame,
+    LineFrameOnly,
     SpiralStaircase,
     FishBellyTruss,
     VariablePanelWidthTruss
@@ -31,6 +35,21 @@ public enum EtabsExportMode
 {
     EraseAndRedraw,
     AddAsNew
+}
+
+public enum TrussSpacingOffsetDirection
+{
+    AutoPerpendicular,
+    GlobalX,
+    GlobalY,
+    GlobalZ
+}
+
+public enum EtabsTrussOverlapDrawMode
+{
+    Current,
+    ForceDuplicate,
+    SharedJoints
 }
 
 public enum SupportNodeMode
@@ -167,6 +186,7 @@ public sealed class ParametricMember
     public string EndNodeId { get; set; } = "";
     public string Group { get; set; } = "";
     public string SectionName { get; set; } = "";
+    public string PreviewColorHex { get; set; } = "";
     public bool ReleaseMoments { get; set; }
 }
 
@@ -256,6 +276,7 @@ public sealed class ParametricTrussModel
     public string TrussId { get; set; } = "TR01";
     public string GroupName { get; set; } = "WPF_TRUSS_TR01";
     public TrussType TrussType { get; set; } = TrussType.Warren;
+    public string PreviewColorHex { get; set; } = "#2563EB";
     public double Span { get; set; }
     public double Height { get; set; }
     public int PanelCount { get; set; }

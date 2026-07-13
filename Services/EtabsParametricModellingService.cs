@@ -11,11 +11,13 @@ namespace CSIModellingTools.Services;
 public sealed partial class EtabsParametricModellingService
 {
     private const string EtabsApiObjectProgId = "CSI.ETABS.API.ETABSObject";
+    private const string DefaultFrameSectionName = "Default";
     private const ETABSv1.eUnits EtabsUnitsKnMC = ETABSv1.eUnits.kN_m_C;
     private const ETABSv1.eItemType EtabsObjects = ETABSv1.eItemType.Objects;
     private const int EtabsSelectedPointObjectType = 1;
     private const int EtabsSelectedFrameObjectType = 2;
     private const int EtabsSelectedAreaObjectType = 5;
+    private const int MaxFrameSelectionCount = 500;
 
     public EtabsInstanceListResult ListEtabsInstances()
     {
@@ -90,7 +92,10 @@ public sealed partial class EtabsParametricModellingService
             result.Materials = GetMaterialNames(sapModel, warnings);
             result.LoadPatterns = GetLoadPatternNames(sapModel, warnings);
             result.LoadCombinations = GetComboNames(sapModel, warnings);
-            result.Stories = GetStoryNames(sapModel, warnings);
+            result.StoryInfos = GetStoryInfos(sapModel, warnings);
+            result.Stories = result.StoryInfos.Count > 0
+                ? result.StoryInfos.Select(story => story.Name).ToList()
+                : GetStoryNames(sapModel, warnings);
             result.Groups = GetGroupNames(sapModel, warnings);
             result.Message = $"Loaded {result.FrameSections.Count} frame section(s), {result.ShellProperties.Count} shell property item(s), {result.LoadPatterns.Count} load pattern(s), and {result.LoadCombinations.Count} load combination(s).";
         }
@@ -1689,12 +1694,19 @@ public sealed partial class EtabsParametricModellingService
                         warnings.Add($"Applied add-as-new placement offset: X {request.OffsetX:0.###} m, Y {request.OffsetY:0.###} m, Z {request.OffsetZ:0.###} m.");
                 }
 
+                if (request.OverlapDrawMode == EtabsTrussOverlapDrawMode.ForceDuplicate)
+                    warnings.Add("Overlap draw mode: force draw overlaps. Coincident truss joints are created as separate ETABS point objects.");
+                else if (request.OverlapDrawMode == EtabsTrussOverlapDrawMode.SharedJoints)
+                    warnings.Add("Overlap draw mode: share overlapping joints. Coincident truss joints are mapped to the same ETABS point object.");
+
                 if (request.ReplaceExistingGroup)
                     TryDeleteFramesInGroup(sapModel, groupName, warnings);
 
                 var nodes = model.Nodes.ToDictionary(node => node.Id, StringComparer.OrdinalIgnoreCase);
                 var nodePointNames = CreateEtabsPointsForNodes(sapModel, model, groupName, exportSuffix, request, warnings);
                 var generatedFrames = new List<GeneratedEtabsFrame>();
+                var generatedFramesByEndpointKey = new Dictionary<string, GeneratedEtabsFrame>(StringComparer.OrdinalIgnoreCase);
+                bool warnedDefaultFrameSection = false;
 
                 foreach (ParametricMember member in model.Members)
                 {
@@ -1714,9 +1726,33 @@ public sealed partial class EtabsParametricModellingService
                     }
 
                     string sectionName = (member.SectionName ?? "").Trim();
-                    if (sectionName.Length == 0)
+                    bool useDefaultFrameSection = sectionName.Length == 0;
+                    if (useDefaultFrameSection)
                     {
-                        warnings.Add($"Skipped member '{member.Id}': no frame section selected.");
+                        sectionName = DefaultFrameSectionName;
+                        if (!warnedDefaultFrameSection)
+                        {
+                            warnings.Add("No frame section was selected for one or more truss members. ETABS drawing was attempted with the default frame property.");
+                            warnedDefaultFrameSection = true;
+                        }
+                    }
+
+                    string endpointKey = BuildFrameEndpointKey(startPointName, endPointName);
+                    if (request.OverlapDrawMode == EtabsTrussOverlapDrawMode.SharedJoints &&
+                        generatedFramesByEndpointKey.TryGetValue(endpointKey, out GeneratedEtabsFrame? existingFrame))
+                    {
+                        if (!string.Equals(existingFrame.SectionName, sectionName, StringComparison.OrdinalIgnoreCase))
+                            warnings.Add($"Member '{member.Id}' shares overlapping joints with '{existingFrame.MemberId}', so ETABS reused frame '{existingFrame.EtabsFrameName}'. The existing section '{existingFrame.SectionName}' was kept instead of '{sectionName}'.");
+                        else
+                            warnings.Add($"Member '{member.Id}' shares overlapping joints with '{existingFrame.MemberId}', so ETABS reused frame '{existingFrame.EtabsFrameName}'.");
+
+                        generatedFrames.Add(new GeneratedEtabsFrame
+                        {
+                            MemberId = member.Id,
+                            EtabsFrameName = existingFrame.EtabsFrameName,
+                            Group = member.Group,
+                            SectionName = existingFrame.SectionName
+                        });
                         continue;
                     }
 
@@ -1743,42 +1779,77 @@ public sealed partial class EtabsParametricModellingService
                             warnings.Add($"Member '{member.Id}' was drawn with ETABS automatic frame name because the preferred name '{preferredFrameName}' was unavailable.");
                     }
 
+                    if (ret != 0 && useDefaultFrameSection)
+                    {
+                        frameName = "";
+                        ret = sapModel.FrameObj.AddByPoint(
+                            startPointName,
+                            endPointName,
+                            ref frameName,
+                            "",
+                            preferredFrameName);
+
+                        if (ret != 0)
+                        {
+                            frameName = "";
+                            ret = sapModel.FrameObj.AddByPoint(
+                                startPointName,
+                                endPointName,
+                                ref frameName,
+                                "",
+                                "");
+                        }
+                    }
+
                     if (ret != 0 || string.IsNullOrWhiteSpace(frameName))
                     {
                         warnings.Add($"ETABS could not draw member '{member.Id}'. Return code: {ret}.");
                         continue;
                     }
 
-                    TryAssignFrameSection(sapModel, frameName, member.Id, sectionName, warnings);
+                    if (!useDefaultFrameSection)
+                        TryAssignFrameSection(sapModel, frameName, member.Id, sectionName, warnings);
                     if (ShouldAssignFrameEndReleases(model, member))
                         TryAssignTrussReleases(sapModel, frameName, member.Id, warnings);
                     TryAssignFrameToEtabsGroup(sapModel, frameName, groupName, member.Id, warnings);
 
-                    generatedFrames.Add(new GeneratedEtabsFrame
+                    var generatedFrame = new GeneratedEtabsFrame
                     {
                         MemberId = member.Id,
                         EtabsFrameName = frameName,
                         Group = member.Group,
-                        SectionName = sectionName
-                    });
+                        SectionName = useDefaultFrameSection ? DefaultFrameSectionName : sectionName
+                    };
+                    generatedFrames.Add(generatedFrame);
+                    if (request.OverlapDrawMode == EtabsTrussOverlapDrawMode.SharedJoints)
+                        generatedFramesByEndpointKey[endpointKey] = generatedFrame;
                 }
 
                 List<string> generatedShellNames = DrawParametricShells(sapModel, model, groupName, exportSuffix, request, nodePointNames, warnings);
                 TryAssignSupportRestraints(sapModel, model, nodePointNames, warnings);
                 TryApplyLoads(sapModel, model, nodePointNames, generatedFrames, warnings);
                 TryRefreshEtabsView(sapModel);
+                List<string> generatedFrameNames = generatedFrames
+                    .Select(frame => frame.EtabsFrameName)
+                    .Where(frameName => !string.IsNullOrWhiteSpace(frameName))
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
+                List<string> objectNames = generatedFrameNames
+                    .Concat(generatedShellNames)
+                    .Distinct(StringComparer.OrdinalIgnoreCase)
+                    .ToList();
 
                 return new EtabsTrussDrawResult
                 {
                     IsError = false,
                     Message = generatedShellNames.Count == 0
-                        ? $"Drawn {generatedFrames.Count} truss frame object(s) in ETABS group '{groupName}'."
-                        : $"Drawn {generatedFrames.Count} truss frame object(s) and {generatedShellNames.Count} shell area object(s) in ETABS group '{groupName}'.",
-                    DrawnCount = generatedFrames.Count,
+                        ? $"Drawn {generatedFrameNames.Count} truss frame object(s) in ETABS group '{groupName}'."
+                        : $"Drawn {generatedFrameNames.Count} truss frame object(s) and {generatedShellNames.Count} shell area object(s) in ETABS group '{groupName}'.",
+                    DrawnCount = generatedFrameNames.Count,
                     ShellCount = generatedShellNames.Count,
                     Frames = generatedFrames,
                     ShellNames = generatedShellNames,
-                    ObjectNames = generatedFrames.Select(frame => frame.EtabsFrameName).Concat(generatedShellNames).ToList(),
+                    ObjectNames = objectNames,
                     Warnings = warnings
                 };
             }
@@ -1794,6 +1865,170 @@ public sealed partial class EtabsParametricModellingService
             {
                 IsError = true,
                 Message = ex.Message,
+                Warnings = warnings
+            };
+        }
+    }
+
+    public EtabsTrussCrashCheckResult CheckTrussCrashes(EtabsTrussCrashCheckRequest request)
+    {
+        var warnings = new List<string>();
+        var crashes = new List<EtabsTrussCrashRow>();
+
+        try
+        {
+            ParametricTrussModel model = request.Model;
+            if (model.Members.Count == 0 || model.Nodes.Count == 0)
+                throw new InvalidOperationException("No parametric truss model was provided for crash checking.");
+
+            double tolerance = double.IsFinite(request.Tolerance)
+                ? Math.Clamp(Math.Abs(request.Tolerance), 0.001, 0.5)
+                : 0.01;
+
+            ETABSv1.cOAPI etabsObject = GetEtabsObject(request.EtabsInstanceId);
+            ETABSv1.cSapModel sapModel = GetRequiredSapModelObject(etabsObject);
+            ETABSv1.eUnits? originalUnits = TryGetPresentUnits(sapModel);
+
+            try
+            {
+                TrySetPresentUnitsToKnM(sapModel, warnings);
+                Dictionary<string, ParametricNode> nodes = model.Nodes.ToDictionary(node => node.Id, StringComparer.OrdinalIgnoreCase);
+                List<TrussMemberSegment> memberSegments = BuildTrussMemberSegments(model, nodes, warnings);
+                List<string> frameNames = GetAllFrameNames(sapModel, warnings);
+
+                foreach (string frameName in frameNames)
+                {
+                    if (!TryReadExistingFrameSegment(sapModel, frameName, out ExistingFrameSegment existingFrame, warnings))
+                        continue;
+
+                    foreach (TrussMemberSegment trussMember in memberSegments)
+                    {
+                        if (!TryMeasureSegmentOverlap(trussMember.Start, trussMember.End, existingFrame.Start, existingFrame.End, tolerance, out double overlapLength, out double distance))
+                            continue;
+
+                        crashes.Add(new EtabsTrussCrashRow
+                        {
+                            MemberId = trussMember.Member.Id,
+                            MemberGroup = trussMember.Member.Group,
+                            ExistingFrameName = frameName,
+                            ExistingFrameLabel = existingFrame.Label,
+                            ExistingFrameStory = existingFrame.Story,
+                            OverlapLength = overlapLength,
+                            Distance = distance
+                        });
+                    }
+                }
+
+                string message = crashes.Count == 0
+                    ? $"Crash check complete. No same-line ETABS frame was found within {tolerance:0.###} m."
+                    : $"Crash check found {crashes.Count} generated member / existing ETABS frame match(es) within {tolerance:0.###} m.";
+
+                return new EtabsTrussCrashCheckResult
+                {
+                    IsError = false,
+                    Message = message,
+                    Crashes = crashes
+                        .OrderBy(row => row.MemberId, StringComparer.OrdinalIgnoreCase)
+                        .ThenBy(row => row.ExistingFrameName, StringComparer.OrdinalIgnoreCase)
+                        .ToList(),
+                    Warnings = warnings
+                };
+            }
+            finally
+            {
+                if (originalUnits != null)
+                    TryRestorePresentUnits(sapModel, originalUnits.Value);
+            }
+        }
+        catch (Exception ex)
+        {
+            return new EtabsTrussCrashCheckResult
+            {
+                IsError = true,
+                Message = ex.Message,
+                Crashes = crashes,
+                Warnings = warnings
+            };
+        }
+    }
+
+    public EtabsFrameSelectionResult SelectEtabsFrames(EtabsFrameSelectionRequest request)
+    {
+        List<string> frameNames = (request.FrameNames ?? [])
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (frameNames.Count == 0)
+        {
+            return new EtabsFrameSelectionResult
+            {
+                IsError = true,
+                Message = "No ETABS frame names were provided for selection."
+            };
+        }
+
+        if (frameNames.Count > MaxFrameSelectionCount)
+        {
+            return new EtabsFrameSelectionResult
+            {
+                IsError = true,
+                Message = $"Selection was not attempted because {frameNames.Count} frame objects exceed the safety limit of {MaxFrameSelectionCount}."
+            };
+        }
+
+        var warnings = new List<string>();
+        var selectedFrameNames = new List<string>();
+        try
+        {
+            ETABSv1.cOAPI etabsObject = GetEtabsObject(request.EtabsInstanceId);
+            ETABSv1.cSapModel sapModel = GetRequiredSapModelObject(etabsObject);
+
+            int clearRet = sapModel.SelectObj.ClearSelection();
+            if (clearRet != 0)
+                throw new InvalidOperationException($"ETABS could not clear the current object selection. Return code: {clearRet}.");
+
+            foreach (string frameName in frameNames)
+            {
+                string pointI = "";
+                string pointJ = "";
+                int existsRet = sapModel.FrameObj.GetPoints(frameName, ref pointI, ref pointJ);
+                if (existsRet != 0 || string.IsNullOrWhiteSpace(pointI) || string.IsNullOrWhiteSpace(pointJ))
+                {
+                    warnings.Add($"Frame '{frameName}' does not exist in the selected ETABS model.");
+                    continue;
+                }
+
+                int selectRet = sapModel.FrameObj.SetSelected(frameName, true, EtabsObjects);
+                if (selectRet == 0)
+                {
+                    selectedFrameNames.Add(frameName);
+                }
+                else
+                {
+                    warnings.Add($"ETABS could not select frame '{frameName}'. Return code: {selectRet}.");
+                }
+            }
+
+            TryRefreshEtabsView(sapModel);
+            return new EtabsFrameSelectionResult
+            {
+                IsError = selectedFrameNames.Count == 0,
+                Message = $"Selected {selectedFrameNames.Count} of {frameNames.Count} ETABS frame object(s).",
+                SelectedCount = selectedFrameNames.Count,
+                SelectedFrameNames = selectedFrameNames,
+                Warnings = warnings
+            };
+        }
+        catch (Exception ex)
+        {
+            return new EtabsFrameSelectionResult
+            {
+                IsError = true,
+                Message = ex.Message,
+                SelectedCount = selectedFrameNames.Count,
+                SelectedFrameNames = selectedFrameNames,
                 Warnings = warnings
             };
         }
@@ -4974,6 +5209,23 @@ public sealed partial class EtabsParametricModellingService
         return EtabsNameUtility.BuildSafeName("", $"{safeObjectName}_{exportSuffix}", 60);
     }
 
+    private static string BuildCoordinateKey(double x, double y, double z)
+    {
+        return string.Format(
+            CultureInfo.InvariantCulture,
+            "{0:0.######}|{1:0.######}|{2:0.######}",
+            Math.Round(x, 6),
+            Math.Round(y, 6),
+            Math.Round(z, 6));
+    }
+
+    private static string BuildFrameEndpointKey(string firstPointName, string secondPointName)
+    {
+        return string.Compare(firstPointName, secondPointName, StringComparison.OrdinalIgnoreCase) <= 0
+            ? $"{firstPointName}|{secondPointName}"
+            : $"{secondPointName}|{firstPointName}";
+    }
+
     internal static List<string> GetFrameSectionNames(ETABSv1.cSapModel sapModel, List<string> warnings)
     {
         var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -6224,6 +6476,49 @@ public sealed partial class EtabsParametricModellingService
         return [];
     }
 
+    private static List<EtabsStoryInfo> GetStoryInfos(ETABSv1.cSapModel sapModel, List<string> warnings)
+    {
+        int numberNames = 0;
+        string[] names = [];
+        try
+        {
+            if (sapModel.Story.GetNameList(ref numberNames, ref names) != 0)
+                return [];
+
+            var stories = new List<EtabsStoryInfo>();
+            foreach (string storyName in names
+                .Take(Math.Min(numberNames, names.Length))
+                .Where(name => !string.IsNullOrWhiteSpace(name))
+                .Select(name => name.Trim())
+                .Distinct(StringComparer.OrdinalIgnoreCase))
+            {
+                double elevation = 0;
+                int elevationRet = sapModel.Story.GetElevation(storyName, ref elevation);
+                if (elevationRet != 0)
+                {
+                    warnings.Add($"ETABS story elevation could not be read for '{storyName}'. Return code: {elevationRet}.");
+                    continue;
+                }
+
+                stories.Add(new EtabsStoryInfo
+                {
+                    Name = storyName,
+                    Elevation = elevation
+                });
+            }
+
+            return stories
+                .OrderBy(story => story.Elevation)
+                .ThenBy(story => story.Name, StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            warnings.Add("ETABS story elevations could not be loaded: " + ex.Message);
+            return [];
+        }
+    }
+
     internal static List<string> GetGroupNames(ETABSv1.cSapModel sapModel, List<string> warnings)
     {
         int numberNames = 0;
@@ -6350,6 +6645,169 @@ public sealed partial class EtabsParametricModellingService
         return groupName;
     }
 
+    private sealed record TrussMemberSegment(ParametricMember Member, Point3 Start, Point3 End);
+
+    private sealed record ExistingFrameSegment(string FrameName, string Label, string Story, Point3 Start, Point3 End);
+
+    private readonly record struct Point3(double X, double Y, double Z);
+
+    private static List<TrussMemberSegment> BuildTrussMemberSegments(
+        ParametricTrussModel model,
+        Dictionary<string, ParametricNode> nodes,
+        List<string> warnings)
+    {
+        var segments = new List<TrussMemberSegment>();
+        foreach (ParametricMember member in model.Members)
+        {
+            if (!nodes.TryGetValue(member.StartNodeId, out ParametricNode? start) ||
+                !nodes.TryGetValue(member.EndNodeId, out ParametricNode? end))
+            {
+                warnings.Add($"Skipped crash check for member '{member.Id}': node reference could not be resolved.");
+                continue;
+            }
+
+            segments.Add(new TrussMemberSegment(member, ToPoint3(start), ToPoint3(end)));
+        }
+
+        return segments;
+    }
+
+    private static bool TryReadExistingFrameSegment(
+        ETABSv1.cSapModel sapModel,
+        string frameName,
+        out ExistingFrameSegment segment,
+        List<string> warnings)
+    {
+        segment = new ExistingFrameSegment(frameName, "", "", default, default);
+        try
+        {
+            string pointI = "";
+            string pointJ = "";
+            int ret = sapModel.FrameObj.GetPoints(frameName, ref pointI, ref pointJ);
+            if (ret != 0 || string.IsNullOrWhiteSpace(pointI) || string.IsNullOrWhiteSpace(pointJ))
+            {
+                warnings.Add($"Skipped existing frame '{frameName}' during crash check: end points could not be read. Return code: {ret}.");
+                return false;
+            }
+
+            (double X, double Y, double Z) i = GetPointCoordinates(sapModel, pointI);
+            (double X, double Y, double Z) j = GetPointCoordinates(sapModel, pointJ);
+            string label = "";
+            string story = "";
+            try
+            {
+                sapModel.FrameObj.GetLabelFromName(frameName, ref label, ref story);
+            }
+            catch
+            {
+                // Label/story are optional display fields.
+            }
+
+            segment = new ExistingFrameSegment(
+                frameName,
+                label,
+                story,
+                new Point3(i.X, i.Y, i.Z),
+                new Point3(j.X, j.Y, j.Z));
+            return true;
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"Skipped existing frame '{frameName}' during crash check: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool TryMeasureSegmentOverlap(
+        Point3 firstStart,
+        Point3 firstEnd,
+        Point3 secondStart,
+        Point3 secondEnd,
+        double tolerance,
+        out double overlapLength,
+        out double distance)
+    {
+        overlapLength = 0;
+        distance = double.PositiveInfinity;
+
+        double firstLength = Distance(firstStart, firstEnd);
+        double secondLength = Distance(secondStart, secondEnd);
+        if (firstLength <= tolerance || secondLength <= tolerance)
+            return false;
+
+        if ((Distance(firstStart, secondStart) <= tolerance && Distance(firstEnd, secondEnd) <= tolerance) ||
+            (Distance(firstStart, secondEnd) <= tolerance && Distance(firstEnd, secondStart) <= tolerance))
+        {
+            overlapLength = Math.Min(firstLength, secondLength);
+            distance = 0;
+            return true;
+        }
+
+        Point3 axis = Scale(Subtract(firstEnd, firstStart), 1.0 / firstLength);
+        double secondStartOffset = Dot(Subtract(secondStart, firstStart), axis);
+        double secondEndOffset = Dot(Subtract(secondEnd, firstStart), axis);
+        Point3 projectedSecondStart = Add(firstStart, Scale(axis, secondStartOffset));
+        Point3 projectedSecondEnd = Add(firstStart, Scale(axis, secondEndOffset));
+        double perpendicularStart = Distance(secondStart, projectedSecondStart);
+        double perpendicularEnd = Distance(secondEnd, projectedSecondEnd);
+        distance = Math.Max(perpendicularStart, perpendicularEnd);
+        if (distance > tolerance)
+            return false;
+
+        Point3 secondDirection = Subtract(secondEnd, secondStart);
+        double parallelMagnitude = CrossLength(axis, Scale(secondDirection, 1.0 / secondLength));
+        if (parallelMagnitude > 0.001)
+            return false;
+
+        double secondMin = Math.Min(secondStartOffset, secondEndOffset);
+        double secondMax = Math.Max(secondStartOffset, secondEndOffset);
+        double overlapStart = Math.Max(0, secondMin);
+        double overlapEnd = Math.Min(firstLength, secondMax);
+        overlapLength = Math.Max(0, overlapEnd - overlapStart);
+        return overlapLength > tolerance;
+    }
+
+    private static Point3 ToPoint3(ParametricNode node)
+    {
+        return new Point3(node.X, node.Y, node.Z);
+    }
+
+    private static Point3 Add(Point3 first, Point3 second)
+    {
+        return new Point3(first.X + second.X, first.Y + second.Y, first.Z + second.Z);
+    }
+
+    private static Point3 Subtract(Point3 first, Point3 second)
+    {
+        return new Point3(first.X - second.X, first.Y - second.Y, first.Z - second.Z);
+    }
+
+    private static Point3 Scale(Point3 point, double factor)
+    {
+        return new Point3(point.X * factor, point.Y * factor, point.Z * factor);
+    }
+
+    private static double Dot(Point3 first, Point3 second)
+    {
+        return first.X * second.X + first.Y * second.Y + first.Z * second.Z;
+    }
+
+    private static double CrossLength(Point3 first, Point3 second)
+    {
+        double x = first.Y * second.Z - first.Z * second.Y;
+        double y = first.Z * second.X - first.X * second.Z;
+        double z = first.X * second.Y - first.Y * second.X;
+        return Math.Sqrt(x * x + y * y + z * z);
+    }
+
+    private static double Distance(Point3 first, Point3 second)
+    {
+        double dx = second.X - first.X;
+        double dy = second.Y - first.Y;
+        double dz = second.Z - first.Z;
+        return Math.Sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
     private static Dictionary<string, string> CreateEtabsPointsForNodes(
         ETABSv1.cSapModel sapModel,
         ParametricTrussModel model,
@@ -6359,6 +6817,12 @@ public sealed partial class EtabsParametricModellingService
         List<string> warnings)
     {
         var nodePointNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var sharedPointNamesByCoordinate = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        bool forceDuplicatePoints =
+            request.AddAsNew ||
+            request.OverlapDrawMode == EtabsTrussOverlapDrawMode.ForceDuplicate;
+        bool shareOverlappingJoints =
+            request.OverlapDrawMode == EtabsTrussOverlapDrawMode.SharedJoints;
 
         foreach (ParametricNode node in model.Nodes)
         {
@@ -6367,7 +6831,17 @@ public sealed partial class EtabsParametricModellingService
             double x = node.X + request.OffsetX;
             double y = node.Y + request.OffsetY;
             double z = node.Z + request.OffsetZ;
-            bool mergeOff = request.AddAsNew;
+            bool mergeOff = forceDuplicatePoints;
+            string coordinateKey = BuildCoordinateKey(x, y, z);
+
+            if (shareOverlappingJoints &&
+                sharedPointNamesByCoordinate.TryGetValue(coordinateKey, out string? sharedPointName) &&
+                !string.IsNullOrWhiteSpace(sharedPointName))
+            {
+                nodePointNames[node.Id] = sharedPointName;
+                TryAssignPointToEtabsGroup(sapModel, sharedPointName, groupName, node.Id, warnings);
+                continue;
+            }
 
             try
             {
@@ -6405,6 +6879,8 @@ public sealed partial class EtabsParametricModellingService
                 }
 
                 nodePointNames[node.Id] = pointName;
+                if (shareOverlappingJoints)
+                    sharedPointNamesByCoordinate[coordinateKey] = pointName;
                 TryAssignPointToEtabsGroup(sapModel, pointName, groupName, node.Id, warnings);
             }
             catch (Exception ex)
@@ -6542,7 +7018,7 @@ public sealed partial class EtabsParametricModellingService
             return !IsTrussChordGroup(member.Group);
         }
 
-        if (model.TrussType == TrussType.SimpleFrame)
+        if (model.TrussType is TrussType.SimpleFrame or TrussType.LineFrameOnly)
             return false;
 
         return !IsTrussChordGroup(member.Group);
@@ -6809,6 +7285,12 @@ public sealed partial class EtabsParametricModellingService
             if (load.TargetType.Equals("MemberGroup", StringComparison.OrdinalIgnoreCase))
             {
                 TryApplyDistributedMemberGroupLoad(sapModel, model, load, frameNamesByMemberId, warnings);
+                continue;
+            }
+
+            if (load.TargetType.Equals("Member", StringComparison.OrdinalIgnoreCase))
+            {
+                TryApplyDistributedMemberLoad(sapModel, load, frameNamesByMemberId, warnings);
             }
         }
     }
@@ -6871,35 +7353,61 @@ public sealed partial class EtabsParametricModellingService
         int direction = ToEtabsDistributedLoadDirection(load.Direction);
         foreach (ParametricMember member in targetMembers)
         {
-            if (!frameNamesByMemberId.TryGetValue(member.Id, out string? frameName) || string.IsNullOrWhiteSpace(frameName))
-            {
-                warnings.Add($"Skipped line load '{load.Id}' on member '{member.Id}': ETABS frame name was not found.");
-                continue;
-            }
+            TryApplyDistributedMemberLoad(sapModel, load, frameNamesByMemberId, warnings, member.Id, direction);
+        }
+    }
 
-            try
-            {
-                int ret = sapModel.FrameObj.SetLoadDistributed(
-                    frameName,
-                    load.LoadPattern,
-                    1,
-                    direction,
-                    0,
-                    1,
-                    load.Magnitude,
-                    load.Magnitude,
-                    "Global",
-                    true,
-                    false,
-                    EtabsObjects);
+    private static void TryApplyDistributedMemberLoad(
+        ETABSv1.cSapModel sapModel,
+        ParametricLoad load,
+        Dictionary<string, string> frameNamesByMemberId,
+        List<string> warnings)
+    {
+        TryApplyDistributedMemberLoad(
+            sapModel,
+            load,
+            frameNamesByMemberId,
+            warnings,
+            load.TargetId,
+            ToEtabsDistributedLoadDirection(load.Direction));
+    }
 
-                if (ret != 0)
-                    warnings.Add($"ETABS could not assign line load '{load.Id}' to frame '{frameName}'. Return code: {ret}.");
-            }
-            catch (Exception ex)
-            {
-                warnings.Add($"ETABS line load '{load.Id}' assignment failed on frame '{frameName}': {ex.Message}");
-            }
+    private static void TryApplyDistributedMemberLoad(
+        ETABSv1.cSapModel sapModel,
+        ParametricLoad load,
+        Dictionary<string, string> frameNamesByMemberId,
+        List<string> warnings,
+        string memberId,
+        int direction)
+    {
+        if (!frameNamesByMemberId.TryGetValue(memberId, out string? frameName) || string.IsNullOrWhiteSpace(frameName))
+        {
+            warnings.Add($"Skipped line load '{load.Id}' on member '{memberId}': ETABS frame name was not found.");
+            return;
+        }
+
+        try
+        {
+            int ret = sapModel.FrameObj.SetLoadDistributed(
+                frameName,
+                load.LoadPattern,
+                1,
+                direction,
+                0,
+                1,
+                load.Magnitude,
+                load.Magnitude,
+                "Global",
+                true,
+                false,
+                EtabsObjects);
+
+            if (ret != 0)
+                warnings.Add($"ETABS could not assign line load '{load.Id}' to frame '{frameName}'. Return code: {ret}.");
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"ETABS line load '{load.Id}' assignment failed on frame '{frameName}': {ex.Message}");
         }
     }
 

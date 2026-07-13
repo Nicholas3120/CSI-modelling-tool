@@ -147,7 +147,7 @@ public sealed class TrussPreviewControl : FrameworkElement
                 continue;
             }
 
-            Color color = ColorForGroup(member.Group);
+            Color color = ColorForMember(member);
             var pen = new Pen(new SolidColorBrush(color), member.Group == ParametricMemberGroups.Diagonal ? 2.0 : 2.6);
             if (string.IsNullOrWhiteSpace(member.SectionName))
                 pen.DashStyle = DashStyles.Dash;
@@ -315,7 +315,9 @@ public sealed class TrussPreviewControl : FrameworkElement
     private static void DrawDimensions(DrawingContext dc, ParametricTrussModel model, double x, double y, double width, double height)
     {
         var pen = new Pen(new SolidColorBrush(Color.FromRgb(100, 116, 139)), 1);
-        double dimY = y + height + 30;
+        DrawPanelDimensions(dc, model, x, y, width, height, pen);
+
+        double dimY = y + height + 48;
         dc.DrawLine(pen, new Point(x, dimY), new Point(x + width, dimY));
         dc.DrawLine(pen, new Point(x, dimY - 6), new Point(x, dimY + 6));
         dc.DrawLine(pen, new Point(x + width, dimY - 6), new Point(x + width, dimY + 6));
@@ -334,6 +336,56 @@ public sealed class TrussPreviewControl : FrameworkElement
             ? $" / {model.OrthogonalYZTrussLineCount} Y-Z lines / {model.OrthogonalYZPanelsPerBay} panels per Y bay"
             : "";
         DrawText(dc, $"{model.TrussId} / {model.TrussType} / {model.PanelCount} panels{bayText}{orthogonalText}", new Point(18, 10), 13, Brushes.DimGray);
+    }
+
+    private static void DrawPanelDimensions(DrawingContext dc, ParametricTrussModel model, double x, double y, double width, double height, Pen pen)
+    {
+        List<double> stations = BuildPanelStations(model);
+        if (stations.Count < 2)
+            return;
+
+        double minStation = stations[0];
+        double maxStation = stations[^1];
+        double stationRange = Math.Max(0.000001, maxStation - minStation);
+        double dimY = y + height + 18;
+
+        for (int index = 0; index < stations.Count - 1; index++)
+        {
+            double startStation = stations[index];
+            double endStation = stations[index + 1];
+            if (endStation - startStation <= 0.000001)
+                continue;
+
+            double startX = x + (startStation - minStation) / stationRange * width;
+            double endX = x + (endStation - minStation) / stationRange * width;
+            double midX = (startX + endX) / 2.0;
+            double labelY = dimY + (index % 2 == 0 ? -16 : 8);
+
+            dc.DrawLine(pen, new Point(startX, dimY), new Point(endX, dimY));
+            dc.DrawLine(pen, new Point(startX, dimY - 4), new Point(startX, dimY + 4));
+            dc.DrawLine(pen, new Point(endX, dimY - 4), new Point(endX, dimY + 4));
+            DrawCenteredText(dc, $"{endStation - startStation:0.###} m", new Point(midX, labelY), 9.5, Brushes.SlateGray);
+        }
+    }
+
+    private static List<double> BuildPanelStations(ParametricTrussModel model)
+    {
+        List<double> stations = model.Nodes
+            .Where(node => node.IsBottomChord || node.IsTopChord)
+            .Select(node => node.PreviewX)
+            .Where(double.IsFinite)
+            .DistinctBy(station => Math.Round(station, 6))
+            .OrderBy(station => station)
+            .ToList();
+
+        if (stations.Count >= 2)
+            return stations;
+
+        int panelCount = Math.Max(1, model.PanelCount);
+        double span = Math.Max(0.001, model.Span);
+        return Enumerable.Range(0, panelCount + 1)
+            .Select(index => span * index / panelCount)
+            .ToList();
     }
 
     private static void DrawBayPlanInset(DrawingContext dc, ParametricTrussModel model, double actualWidth, double actualHeight)
@@ -463,6 +515,37 @@ public sealed class TrussPreviewControl : FrameworkElement
         };
     }
 
+    private static Color ColorForMember(ParametricMember member)
+    {
+        return TryParseHexColor(member.PreviewColorHex, out Color color)
+            ? color
+            : ColorForGroup(member.Group);
+    }
+
+    private static bool TryParseHexColor(string? value, out Color color)
+    {
+        color = default;
+        string text = (value ?? "").Trim();
+        if (text.StartsWith("#", StringComparison.Ordinal))
+            text = text[1..];
+
+        if (text.Length != 6)
+            return false;
+
+        try
+        {
+            byte r = Convert.ToByte(text[0..2], 16);
+            byte g = Convert.ToByte(text[2..4], 16);
+            byte b = Convert.ToByte(text[4..6], 16);
+            color = Color.FromRgb(r, g, b);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static List<int> BuildOrthogonalXStationIndices(int panelCount, OrthogonalTrussPlacementMode placementMode)
     {
         int clampedPanelCount = Math.Max(2, panelCount);
@@ -492,6 +575,14 @@ public sealed class TrussPreviewControl : FrameworkElement
         FormattedText formattedText = CreateFormattedText(text, fontSize, brush, pixelsPerDip);
 
         dc.DrawText(formattedText, point);
+    }
+
+    private static void DrawCenteredText(DrawingContext dc, string text, Point point, double fontSize, Brush brush)
+    {
+        double pixelsPerDip = VisualTreeHelper.GetDpi(Application.Current.MainWindow).PixelsPerDip;
+        FormattedText formattedText = CreateFormattedText(text, fontSize, brush, pixelsPerDip);
+
+        dc.DrawText(formattedText, new Point(point.X - formattedText.Width / 2.0, point.Y));
     }
 
     private static void DrawBadge(DrawingContext dc, string text, Point point)

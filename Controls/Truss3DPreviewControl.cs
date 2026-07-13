@@ -82,9 +82,7 @@ public sealed class Truss3DPreviewControl : HelixViewport3D
                 Diameter = member.Group.Contains("YZ", StringComparison.OrdinalIgnoreCase) ? memberDiameter * 1.06 : memberDiameter,
                 InnerDiameter = 0,
                 ThetaDiv = 10,
-                Fill = BrushFrom(string.IsNullOrWhiteSpace(member.SectionName)
-                    ? Color.FromRgb(148, 163, 184)
-                    : ColorForGroup(member.Group))
+                Fill = BrushFrom(ColorForMember(member))
             });
         }
 
@@ -167,5 +165,36 @@ public sealed class Truss3DPreviewControl : HelixViewport3D
             ParametricMemberGroups.Secondary => Color.FromRgb(217, 119, 6),
             _ => Color.FromRgb(30, 41, 59)
         };
+    }
+
+    private static Color ColorForMember(ParametricMember member)
+    {
+        return TryParseHexColor(member.PreviewColorHex, out Color color)
+            ? color
+            : ColorForGroup(member.Group);
+    }
+
+    private static bool TryParseHexColor(string? value, out Color color)
+    {
+        color = default;
+        string text = (value ?? "").Trim();
+        if (text.StartsWith("#", StringComparison.Ordinal))
+            text = text[1..];
+
+        if (text.Length != 6)
+            return false;
+
+        try
+        {
+            byte r = Convert.ToByte(text[0..2], 16);
+            byte g = Convert.ToByte(text[2..4], 16);
+            byte b = Convert.ToByte(text[4..6], 16);
+            color = Color.FromRgb(r, g, b);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
