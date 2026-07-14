@@ -1,4 +1,5 @@
 <Solution>
   <Project Path="CSI Modelling Tools.csproj" />
   <Project Path="Tests/ModelCompareRegression/ModelCompareRegression.csproj" />
+  <Project Path="Tests/ParametricTrussRegression/ParametricTrussRegression.csproj" />
 </Solution>

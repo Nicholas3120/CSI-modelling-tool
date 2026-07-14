@@ -9,6 +9,9 @@ namespace CSIModellingTools.Controls;
 
 public sealed class Dome3DPreviewControl : HelixViewport3D
 {
+    private bool _hasFittedModelCamera;
+    private bool _pendingInitialZoomExtents;
+
     public static readonly DependencyProperty ModelProperty =
         DependencyProperty.Register(
             nameof(Model),
@@ -32,18 +35,28 @@ public sealed class Dome3DPreviewControl : HelixViewport3D
         IsHeadLightEnabled = true;
         ShowCoordinateSystem = true;
         ShowViewCube = true;
-        ZoomExtentsWhenLoaded = true;
+        ZoomExtentsWhenLoaded = false;
         ModelUpDirection = new Vector3D(0, 0, 1);
-        Loaded += (_, _) => RebuildScene();
+        Loaded += (_, _) =>
+        {
+            if (_pendingInitialZoomExtents)
+            {
+                _pendingInitialZoomExtents = false;
+                RequestZoomExtents();
+                return;
+            }
+
+            RebuildScene(forceCameraFit: !_hasFittedModelCamera);
+        };
     }
 
     private static void OnModelChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs e)
     {
         if (dependencyObject is Dome3DPreviewControl control)
-            control.RebuildScene();
+            control.RebuildScene(forceCameraFit: !control._hasFittedModelCamera);
     }
 
-    private void RebuildScene()
+    private void RebuildScene(bool forceCameraFit = false)
     {
         Children.Clear();
         Children.Add(new DefaultLights());
@@ -60,10 +73,24 @@ public sealed class Dome3DPreviewControl : HelixViewport3D
         (Point3D min, Point3D max) = GetBounds(model.Nodes);
         Point3D center = new((min.X + max.X) / 2.0, (min.Y + max.Y) / 2.0, (min.Z + max.Z) / 2.0);
         double sceneSize = Math.Max((max - min).Length, 1.0);
-        Camera = BuildCamera(center, sceneSize);
-        DefaultCamera = Camera;
-        if (IsLoaded)
-            Dispatcher.BeginInvoke(() => ZoomExtents(250), DispatcherPriority.Background);
+        if (forceCameraFit || !_hasFittedModelCamera || Camera == null)
+        {
+            Camera = BuildCamera(center, sceneSize);
+            DefaultCamera = Camera;
+            _hasFittedModelCamera = true;
+            RequestZoomExtents();
+        }
+    }
+
+    private void RequestZoomExtents()
+    {
+        if (!IsLoaded)
+        {
+            _pendingInitialZoomExtents = true;
+            return;
+        }
+
+        Dispatcher.BeginInvoke(() => ZoomExtents(250), DispatcherPriority.Background);
     }
 
     private void AddShellMesh(ParametricDomeModel model, IReadOnlyDictionary<string, DomeNode> nodes)

@@ -9,6 +9,9 @@ namespace CSIModellingTools.Controls;
 
 public sealed class Truss3DPreviewControl : HelixViewport3D
 {
+    private bool _hasFittedModelCamera;
+    private bool _pendingInitialZoomExtents;
+
     public static readonly DependencyProperty ModelProperty =
         DependencyProperty.Register(
             nameof(Model),
@@ -35,18 +38,28 @@ public sealed class Truss3DPreviewControl : HelixViewport3D
         ZoomAroundMouseDownPoint = true;
         ShowCoordinateSystem = true;
         ShowViewCube = true;
-        ZoomExtentsWhenLoaded = true;
+        ZoomExtentsWhenLoaded = false;
         ModelUpDirection = new Vector3D(0, 0, 1);
-        Loaded += (_, _) => RebuildScene();
+        Loaded += (_, _) =>
+        {
+            if (_pendingInitialZoomExtents)
+            {
+                _pendingInitialZoomExtents = false;
+                RequestZoomExtents();
+                return;
+            }
+
+            RebuildScene(forceCameraFit: !_hasFittedModelCamera);
+        };
     }
 
     private static void OnModelChanged(DependencyObject dependencyObject, DependencyPropertyChangedEventArgs e)
     {
         if (dependencyObject is Truss3DPreviewControl control)
-            control.RebuildScene();
+            control.RebuildScene(forceCameraFit: !control._hasFittedModelCamera);
     }
 
-    private void RebuildScene()
+    private void RebuildScene(bool forceCameraFit = false)
     {
         Children.Clear();
         Children.Add(new DefaultLights());
@@ -54,8 +67,7 @@ public sealed class Truss3DPreviewControl : HelixViewport3D
         ParametricTrussModel? model = Model;
         if (model == null || model.Nodes.Count == 0)
         {
-            Camera = new PerspectiveCamera(new Point3D(8, -10, 6), new Vector3D(-8, 10, -6), new Vector3D(0, 0, 1), 40);
-            DefaultCamera = Camera;
+            EnsureDefaultCamera();
             return;
         }
 
@@ -101,10 +113,33 @@ public sealed class Truss3DPreviewControl : HelixViewport3D
             });
         }
 
-        Camera = BuildCamera(center, sceneSize);
+        if (forceCameraFit || !_hasFittedModelCamera || Camera == null)
+        {
+            Camera = BuildCamera(center, sceneSize);
+            DefaultCamera = Camera;
+            _hasFittedModelCamera = true;
+            RequestZoomExtents();
+        }
+    }
+
+    private void EnsureDefaultCamera()
+    {
+        if (Camera != null)
+            return;
+
+        Camera = new PerspectiveCamera(new Point3D(8, -10, 6), new Vector3D(-8, 10, -6), new Vector3D(0, 0, 1), 40);
         DefaultCamera = Camera;
-        if (IsLoaded)
-            Dispatcher.BeginInvoke(() => ZoomExtents(250), DispatcherPriority.Background);
+    }
+
+    private void RequestZoomExtents()
+    {
+        if (!IsLoaded)
+        {
+            _pendingInitialZoomExtents = true;
+            return;
+        }
+
+        Dispatcher.BeginInvoke(() => ZoomExtents(250), DispatcherPriority.Background);
     }
 
     private static (Point3D Min, Point3D Max) GetBounds(IEnumerable<ParametricNode> nodes)
