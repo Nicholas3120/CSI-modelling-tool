@@ -70,6 +70,8 @@ public sealed class ModelCompareObjectResultViewModel : INotifyPropertyChanged
         ModelCompareMemberType.Beam => "Beam",
         ModelCompareMemberType.Column => "Column",
         ModelCompareMemberType.Brace => "Brace",
+        ModelCompareMemberType.Slab => "Slab",
+        ModelCompareMemberType.Wall => "Wall",
         ModelCompareMemberType.Area => "Area / shell",
         ModelCompareMemberType.Other => "Other",
         _ => "Definition"

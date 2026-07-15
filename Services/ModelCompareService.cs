@@ -25,6 +25,12 @@ public sealed class ModelCompareService
         bool areaPropertyDataAvailable = CanCompareCategory(
             oldSnapshot.Metadata.AreaPropertiesReadStatus,
             newSnapshot.Metadata.AreaPropertiesReadStatus);
+        Dictionary<string, ModelCompareMemberType> oldAreaMemberTypes = IsComparableStatus(oldSnapshot.Metadata.AreaPropertiesReadStatus)
+            ? BuildAreaMemberTypesByProperty(oldSnapshot.AreaProperties)
+            : [];
+        Dictionary<string, ModelCompareMemberType> newAreaMemberTypes = IsComparableStatus(newSnapshot.Metadata.AreaPropertiesReadStatus)
+            ? BuildAreaMemberTypesByProperty(newSnapshot.AreaProperties)
+            : [];
 
         if (CanCompareCategory(oldSnapshot.Metadata.FramesReadStatus, newSnapshot.Metadata.FramesReadStatus))
         {
@@ -49,7 +55,15 @@ public sealed class ModelCompareService
             comparison,
             () =>
             {
-                CompareAreas(oldSnapshot.Areas, newSnapshot.Areas, settings, areaPropertyDataAvailable, results, SummaryFor(comparison, ModelCompareObjectType.Area));
+                CompareAreas(
+                    oldSnapshot.Areas,
+                    newSnapshot.Areas,
+                    settings,
+                    areaPropertyDataAvailable,
+                    oldAreaMemberTypes,
+                    newAreaMemberTypes,
+                    results,
+                    SummaryFor(comparison, ModelCompareObjectType.Area));
                 if (!areaPropertyDataAvailable)
                     comparison.Warnings.Add("Area material and thickness comparison was skipped because area property completeness is unavailable.");
             });
@@ -377,9 +391,12 @@ public sealed class ModelCompareService
         IReadOnlyList<ModelCompareAreaObjectSnapshot> newAreas,
         ModelCompareToleranceSettings settings,
         bool comparePropertyDetails,
+        IReadOnlyDictionary<string, ModelCompareMemberType> oldMemberTypesByProperty,
+        IReadOnlyDictionary<string, ModelCompareMemberType> newMemberTypesByProperty,
         List<ModelCompareResultRow> results,
         ModelCompareCategorySummary summary)
     {
+        int areaResultStart = results.Count;
         List<ModelCompareAreaObjectSnapshot> orderedOld = oldAreas
             .OrderBy(area => area.AreaName, StringComparer.OrdinalIgnoreCase)
             .ToList();
@@ -390,7 +407,7 @@ public sealed class ModelCompareService
         var matchedNew = new HashSet<int>();
         var relocatedIdMatches = new List<RelocatedAreaMatch>();
 
-        // Tier 1: persistent tracking ID. A shared area ID is the same slab even if it was reshaped or renamed.
+        // Tier 1: persistent tracking ID. A shared area ID is the same physical area even if reshaped or renamed.
         var newByUid = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
         for (int index = 0; index < orderedNew.Count; index++)
         {
@@ -412,7 +429,8 @@ public sealed class ModelCompareService
             matchedOld.Add(oldIndex);
             matchedNew.Add(newIndex);
             int uidResultStart = results.Count;
-            MatchAreaPair(orderedOld[oldIndex], orderedNew[newIndex], settings, comparePropertyDetails, results,
+            MatchAreaPair(orderedOld[oldIndex], orderedNew[newIndex], settings, comparePropertyDetails,
+                oldMemberTypesByProperty, newMemberTypesByProperty, results,
                 ModelCompareMatchMethod.PersistentId, "Matched by tool-owned area ID.");
             RecordRelocatedIdMatch(orderedOld[oldIndex], orderedNew[newIndex], settings, relocatedIdMatches);
             TallyMatched(summary, uidResultStart, results.Count);
@@ -451,14 +469,25 @@ public sealed class ModelCompareService
             matchedOld.Add(oldIndex);
             matchedNew.Add(newIndex);
             int geometryResultStart = results.Count;
-            MatchAreaPair(orderedOld[oldIndex], orderedNew[newIndex], settings, comparePropertyDetails, results,
+            MatchAreaPair(orderedOld[oldIndex], orderedNew[newIndex], settings, comparePropertyDetails,
+                oldMemberTypesByProperty, newMemberTypesByProperty, results,
                 ModelCompareMatchMethod.ExactAreaGeometry, "Normalized area corner geometry matches.");
             TallyMatched(summary, geometryResultStart, results.Count);
         }
 
-        // Tier 3: coverage / re-partition. A slab split into several (or several merged into one) covers the
+        // Tier 3: coverage / re-partition. An area split into several (or several merged into one) covers the
         // same footprint on the same plane, so report it as a single re-partition instead of add + remove.
-        DetectAreaRepartitions(orderedOld, orderedNew, matchedOld, matchedNew, settings, comparePropertyDetails, results, summary);
+        DetectAreaRepartitions(
+            orderedOld,
+            orderedNew,
+            matchedOld,
+            matchedNew,
+            settings,
+            comparePropertyDetails,
+            oldMemberTypesByProperty,
+            newMemberTypesByProperty,
+            results,
+            summary);
 
         for (int oldIndex = 0; oldIndex < orderedOld.Count; oldIndex++)
         {
@@ -500,10 +529,18 @@ public sealed class ModelCompareService
             DetectAndEmitAreaBackfill(newArea, settings, relocatedIdMatches, results);
             summary.Added++;
         }
+
+        ApplyAreaMemberTypes(
+            results,
+            areaResultStart,
+            orderedOld,
+            orderedNew,
+            oldMemberTypesByProperty,
+            newMemberTypesByProperty);
     }
 
-    // A slab matched by GUID can be reported as relocated while a different, newly added slab takes over its
-    // former footprint. Identity matching alone reports that as "slab moved" + "slab added" with no connection,
+    // An area matched by GUID can be reported as relocated while a different, newly added area takes over its
+    // former footprint. Identity matching alone reports that as "area moved" + "area added" with no connection,
     // which reads as if the old location changed. This surfaces the relationship explicitly so the relocation is
     // not mistaken for an unchanged location, without hiding either the move or the addition.
     private static void RecordRelocatedIdMatch(
@@ -544,7 +581,7 @@ public sealed class ModelCompareService
         results.Add(BuildResult(
             ModelCompareChangeType.Modified,
             ModelCompareObjectType.Area,
-            $"Slab backfill{location}: an added slab sits on the former footprint of a relocated slab",
+            $"Area backfill{location}: an added area sits on the former footprint of a relocated area",
             $"'{backfill.OldArea.AreaName}' relocated to centroid ({FormatNumber(newCentroid.X)}, {FormatNumber(newCentroid.Y)}, {FormatNumber(newCentroid.Z)})",
             $"'{addedArea.AreaName}' added here (new object; assignments did not carry over)",
             ModelCompareChangeImportance.Medium));
@@ -552,7 +589,7 @@ public sealed class ModelCompareService
             ModelCompareMatchMethod.ExactAreaGeometry,
             ModelCompareConfidenceLevel.High,
             1.0,
-            "A GUID-matched slab moved away and a different, newly added slab now sits on its former footprint. Reported so the relocation is not mistaken for an unchanged location.",
+            "A GUID-matched area moved away and a different, newly added area now sits on its former footprint. Reported so the relocation is not mistaken for an unchanged location.",
             null,
             null,
             null,
@@ -566,12 +603,21 @@ public sealed class ModelCompareService
         ModelCompareAreaObjectSnapshot newArea,
         ModelCompareToleranceSettings settings,
         bool comparePropertyDetails,
+        IReadOnlyDictionary<string, ModelCompareMemberType> oldMemberTypesByProperty,
+        IReadOnlyDictionary<string, ModelCompareMemberType> newMemberTypesByProperty,
         List<ModelCompareResultRow> results,
         ModelCompareMatchMethod matchMethod,
         string reason)
     {
         int resultStart = results.Count;
-        CompareMatchedArea(oldArea, newArea, settings, comparePropertyDetails, results);
+        CompareMatchedArea(
+            oldArea,
+            newArea,
+            settings,
+            comparePropertyDetails,
+            ResolveAreaMemberType(oldArea, oldMemberTypesByProperty),
+            ResolveAreaMemberType(newArea, newMemberTypesByProperty),
+            results);
         ApplyDiagnostics(results, resultStart, new ComparisonDiagnostics(
             matchMethod,
             ModelCompareConfidenceLevel.High,
@@ -592,6 +638,8 @@ public sealed class ModelCompareService
         HashSet<int> matchedNew,
         ModelCompareToleranceSettings settings,
         bool comparePropertyDetails,
+        IReadOnlyDictionary<string, ModelCompareMemberType> oldMemberTypesByProperty,
+        IReadOnlyDictionary<string, ModelCompareMemberType> newMemberTypesByProperty,
         List<ModelCompareResultRow> results,
         ModelCompareCategorySummary summary)
     {
@@ -618,7 +666,12 @@ public sealed class ModelCompareService
                 var adjacent = new List<int>();
                 for (int b = 0; b < planeNew.Count; b++)
                 {
-                    if (AreasOverlap(orderedOld[planeOld[a]], orderedNew[planeNew[b]]))
+                    ModelCompareAreaObjectSnapshot oldArea = orderedOld[planeOld[a]];
+                    ModelCompareAreaObjectSnapshot newArea = orderedNew[planeNew[b]];
+                    if (AreAreaMemberTypesCompatibleForRepartition(
+                            ResolveAreaMemberType(oldArea, oldMemberTypesByProperty),
+                            ResolveAreaMemberType(newArea, newMemberTypesByProperty)) &&
+                        AreasOverlap(oldArea, newArea))
                     {
                         adjacent.Add(b);
                         newAdjacency[b].Add(a);
@@ -692,9 +745,10 @@ public sealed class ModelCompareService
 
                 if (componentOld.Count == 1 && componentNew.Count == 1)
                 {
-                    // Same footprint, different corner geometry: a reshaped slab. Reuse the matched-area diff.
+                    // Same footprint, different corner geometry: a reshaped area. Reuse the matched-area diff.
                     int reshapeResultStart = results.Count;
-                    MatchAreaPair(oldAreas[0], newAreas[0], settings, comparePropertyDetails, results,
+                    MatchAreaPair(oldAreas[0], newAreas[0], settings, comparePropertyDetails,
+                        oldMemberTypesByProperty, newMemberTypesByProperty, results,
                         ModelCompareMatchMethod.ExactAreaGeometry, "Same footprint on the same plane (reshaped).");
                     TallyMatched(summary, reshapeResultStart, results.Count);
                 }
@@ -717,8 +771,8 @@ public sealed class ModelCompareService
         ModelCompareAreaObjectSnapshot? referenceOld = oldAreas.Count > 0 ? oldAreas[0] : null;
         string story = ((referenceNew ?? referenceOld)?.Story ?? "").Trim();
         string description = story.Length > 0
-            ? $"Slab region at {story} / re-partitioned"
-            : "Slab region / re-partitioned";
+            ? $"Area region at {story} / re-partitioned"
+            : "Area region / re-partitioned";
 
         int resultStart = results.Count;
         results.Add(BuildResult(
@@ -903,19 +957,34 @@ public sealed class ModelCompareService
         ModelCompareAreaObjectSnapshot newArea,
         ModelCompareToleranceSettings settings,
         bool comparePropertyDetails,
+        ModelCompareMemberType oldMemberType,
+        ModelCompareMemberType newMemberType,
         List<ModelCompareResultRow> results)
     {
         string description = $"{DescribeArea(newArea)} matched to {oldArea.AreaName}";
+
+        if (IsKnownAreaMemberType(oldMemberType) &&
+            IsKnownAreaMemberType(newMemberType) &&
+            oldMemberType != newMemberType)
+        {
+            results.Add(BuildResult(
+                ModelCompareChangeType.Modified,
+                ModelCompareObjectType.Area,
+                $"{description} / classification",
+                FormatAreaMemberType(oldMemberType),
+                FormatAreaMemberType(newMemberType),
+                ModelCompareChangeImportance.High));
+        }
 
         AddStringDifference(
             results,
             ModelCompareObjectType.Area,
             $"{description} / opening",
-            oldArea.IsOpening ? "Opening" : "Slab/panel",
-            newArea.IsOpening ? "Opening" : "Slab/panel",
+            DescribeAreaOpeningState(oldArea, oldMemberType),
+            DescribeAreaOpeningState(newArea, newMemberType),
             ModelCompareChangeImportance.High);
 
-        // Reshape detection. A slab matched by persistent ID (or by same-footprint re-partition) can have its
+        // Reshape detection. An area matched by persistent ID (or by same-footprint re-partition) can have its
         // corner geometry changed without any property change, and that would otherwise go unreported. Compare
         // the normalized corner keys, which ignore collinear edge nodes and winding, so only a genuine reshape
         // (moved/added/removed corner) is flagged.
@@ -975,6 +1044,113 @@ public sealed class ModelCompareService
         string propertyName = string.IsNullOrWhiteSpace(area.PropertyName) ? "<none>" : area.PropertyName;
         string materialName = string.IsNullOrWhiteSpace(area.MaterialName) ? "<no material>" : area.MaterialName;
         return $"{propertyName}, t={FormatNumber(area.Thickness)}, mat={materialName}";
+    }
+
+    private static Dictionary<string, ModelCompareMemberType> BuildAreaMemberTypesByProperty(
+        IEnumerable<ModelCompareAreaPropertySnapshot> areaProperties)
+    {
+        return areaProperties
+            .Where(property => !string.IsNullOrWhiteSpace(property.PropertyName))
+            .GroupBy(property => property.PropertyName.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => ClassifyAreaPropertyType(group.First().AreaType),
+                StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static ModelCompareMemberType ClassifyAreaPropertyType(string? areaType)
+    {
+        string value = (areaType ?? "").Trim();
+        if (string.Equals(value, "Wall", StringComparison.OrdinalIgnoreCase))
+            return ModelCompareMemberType.Wall;
+
+        // These are the ETABS eSlabType names currently returned by the extractor. Keep the list explicit so
+        // an unfamiliar or externally-authored value remains generic instead of being guessed as a slab.
+        return value.ToUpperInvariant() switch
+        {
+            "SLAB" or "DROP" or "STIFF_DO_NOT_USE" or "RIBBED" or "WAFFLE" or "MAT" or "FOOTING" => ModelCompareMemberType.Slab,
+            _ => ModelCompareMemberType.Area
+        };
+    }
+
+    private static ModelCompareMemberType ResolveAreaMemberType(
+        ModelCompareAreaObjectSnapshot area,
+        IReadOnlyDictionary<string, ModelCompareMemberType> memberTypesByProperty)
+    {
+        string propertyName = (area.PropertyName ?? "").Trim();
+        return propertyName.Length > 0 && memberTypesByProperty.TryGetValue(propertyName, out ModelCompareMemberType memberType)
+            ? memberType
+            : ModelCompareMemberType.Area;
+    }
+
+    private static bool IsKnownAreaMemberType(ModelCompareMemberType memberType)
+    {
+        return memberType is ModelCompareMemberType.Slab or ModelCompareMemberType.Wall;
+    }
+
+    private static bool AreAreaMemberTypesCompatibleForRepartition(
+        ModelCompareMemberType oldMemberType,
+        ModelCompareMemberType newMemberType)
+    {
+        return !IsKnownAreaMemberType(oldMemberType) ||
+            !IsKnownAreaMemberType(newMemberType) ||
+            oldMemberType == newMemberType;
+    }
+
+    private static string FormatAreaMemberType(ModelCompareMemberType memberType)
+    {
+        return memberType switch
+        {
+            ModelCompareMemberType.Slab => "Slab",
+            ModelCompareMemberType.Wall => "Wall",
+            _ => "Area"
+        };
+    }
+
+    private static string DescribeAreaOpeningState(
+        ModelCompareAreaObjectSnapshot area,
+        ModelCompareMemberType memberType)
+    {
+        return area.IsOpening ? "Opening" : $"{FormatAreaMemberType(memberType)}/panel";
+    }
+
+    private static void ApplyAreaMemberTypes(
+        List<ModelCompareResultRow> results,
+        int startIndex,
+        IReadOnlyList<ModelCompareAreaObjectSnapshot> oldAreas,
+        IReadOnlyList<ModelCompareAreaObjectSnapshot> newAreas,
+        IReadOnlyDictionary<string, ModelCompareMemberType> oldMemberTypesByProperty,
+        IReadOnlyDictionary<string, ModelCompareMemberType> newMemberTypesByProperty)
+    {
+        Dictionary<string, ModelCompareMemberType> oldTypesByName = oldAreas
+            .Where(area => !string.IsNullOrWhiteSpace(area.AreaName))
+            .GroupBy(area => area.AreaName.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => ResolveAreaMemberType(group.First(), oldMemberTypesByProperty),
+                StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, ModelCompareMemberType> newTypesByName = newAreas
+            .Where(area => !string.IsNullOrWhiteSpace(area.AreaName))
+            .GroupBy(area => area.AreaName.Trim(), StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(
+                group => group.Key,
+                group => ResolveAreaMemberType(group.First(), newMemberTypesByProperty),
+                StringComparer.OrdinalIgnoreCase);
+
+        for (int index = startIndex; index < results.Count; index++)
+        {
+            ModelCompareResultRow result = results[index];
+            if (result.ObjectType != ModelCompareObjectType.Area)
+                continue;
+
+            newTypesByName.TryGetValue((result.NewEtabsObjectName ?? "").Trim(), out ModelCompareMemberType newMemberType);
+            oldTypesByName.TryGetValue((result.OldEtabsObjectName ?? "").Trim(), out ModelCompareMemberType oldMemberType);
+            result.MemberType = IsKnownAreaMemberType(newMemberType)
+                ? newMemberType
+                : IsKnownAreaMemberType(oldMemberType)
+                    ? oldMemberType
+                    : ModelCompareMemberType.Area;
+        }
     }
 
     private static void MatchLikelyMovedFrames(
@@ -1253,13 +1429,30 @@ public sealed class ModelCompareService
         int modified = 0;
         foreach (string name in oldByName.Keys.Intersect(newByName.Keys, StringComparer.OrdinalIgnoreCase).OrderBy(name => name, StringComparer.OrdinalIgnoreCase))
         {
+            ModelCompareAreaPropertySnapshot oldProperty = oldByName[name];
+            ModelCompareAreaPropertySnapshot newProperty = newByName[name];
             int start = results.Count;
+            ModelCompareMemberType oldMemberType = ClassifyAreaPropertyType(oldProperty.AreaType);
+            ModelCompareMemberType newMemberType = ClassifyAreaPropertyType(newProperty.AreaType);
+            if (IsKnownAreaMemberType(oldMemberType) &&
+                IsKnownAreaMemberType(newMemberType) &&
+                oldMemberType != newMemberType)
+            {
+                results.Add(BuildResult(
+                    ModelCompareChangeType.Modified,
+                    ModelCompareObjectType.AreaProperty,
+                    $"Area property '{name}' / classification",
+                    FormatAreaMemberType(oldMemberType),
+                    FormatAreaMemberType(newMemberType),
+                    ModelCompareChangeImportance.High));
+            }
+
             AddNumericDifference(
                 results,
                 ModelCompareObjectType.AreaProperty,
                 $"Area property '{name}' / thickness",
-                oldByName[name].Thickness,
-                newByName[name].Thickness,
+                oldProperty.Thickness,
+                newProperty.Thickness,
                 settings.DimensionTolerance,
                 ModelCompareChangeImportance.High);
             if (results.Count > start)

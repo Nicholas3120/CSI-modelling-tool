@@ -64,6 +64,8 @@ public enum ModelCompareMemberType
     Column,
     Brace,
     Area,
+    Slab,
+    Wall,
     Other
 }
 

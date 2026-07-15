@@ -78,7 +78,7 @@ public sealed class ModelCompareViewModel : ObservableObject
     public IReadOnlyList<string> ChangeTypeFilterOptions { get; } = ["All", .. Enum.GetNames<ModelCompareChangeType>()];
     public IReadOnlyList<string> ObjectTypeFilterOptions { get; } = ["All", .. Enum.GetNames<ModelCompareObjectType>()];
     public IReadOnlyList<string> ConfidenceFilterOptions { get; } = ["All", .. Enum.GetNames<ModelCompareConfidenceLevel>()];
-    public IReadOnlyList<string> MemberTypeFilterOptions { get; } = ["All", "Beam", "Column", "Brace", "Area", "Other"];
+    public IReadOnlyList<string> MemberTypeFilterOptions { get; } = ["All", "Beam", "Column", "Brace", "Slab", "Wall", "Area", "Other"];
     public ObservableCollection<string> StoryFilterOptions { get; } = ["All"];
 
     public ICommand RefreshEtabsInstancesCommand { get; }

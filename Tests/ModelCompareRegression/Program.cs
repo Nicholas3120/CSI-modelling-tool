@@ -28,7 +28,12 @@ internal static class Program
             ("Vertical frame classified as column", VerticalFrameClassifiedAsColumn),
             ("Horizontal frame classified as beam", HorizontalFrameClassifiedAsBeam),
             ("Diagonal frame classified as brace", DiagonalFrameClassifiedAsBrace),
-            ("Area change classified as area member", AreaChangeClassifiedAsAreaMember),
+            ("Slab area classified as slab", SlabAreaClassifiedAsSlab),
+            ("Wall area classified as wall", WallAreaClassifiedAsWall),
+            ("Unknown area remains generic", UnknownAreaRemainsGeneric),
+            ("Failed area-property data is not trusted for classification", FailedAreaPropertyDataIsNotTrustedForClassification),
+            ("Wall-slab classification change stays matched", WallSlabClassificationChangeStaysMatched),
+            ("Wall-slab split is not re-partitioned", WallSlabSplitIsNotRepartitioned),
             ("Object row aggregates field changes", ObjectRowAggregatesFieldChanges),
             ("Added object reports added change", AddedObjectReportsAddedChange),
             ("Moved object reports moved change", MovedObjectReportsMovedChange),
@@ -272,17 +277,104 @@ internal static class Program
         Equal(ModelCompareMemberType.Brace, row.MemberType, "A diagonal frame should be classified as a brace.");
     }
 
-    private static void AreaChangeClassifiedAsAreaMember()
+    private static void SlabAreaClassifiedAsSlab()
     {
         ModelCompareSnapshot oldSnapshot = Load("baseline.json");
         ModelCompareSnapshot newSnapshot = Load("baseline.json");
-        newSnapshot.Areas[0].PropertyName = "AP2";
+        newSnapshot.Areas[0].Thickness = 0.25;
 
         ModelCompareResultRow row = Single(Compare(oldSnapshot, newSnapshot).Differences,
             item => item.ObjectType == ModelCompareObjectType.Area &&
-                    item.ObjectDescription.Contains("/ property", StringComparison.OrdinalIgnoreCase));
-        Equal(ModelCompareMemberType.Area, row.MemberType, "An area object change should be classified as an area member.");
+                    item.ObjectDescription.Contains("/ thickness", StringComparison.OrdinalIgnoreCase));
+        Equal(ModelCompareMemberType.Slab, row.MemberType, "An area assigned an ETABS slab property should be classified as a slab.");
         Equal("Story1", row.Story, "The area story should be carried onto the result row.");
+    }
+
+    private static void WallAreaClassifiedAsWall()
+    {
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        oldSnapshot.AreaProperties[0].AreaType = "Wall";
+        newSnapshot.AreaProperties[0].AreaType = "Wall";
+        newSnapshot.Areas[0].Thickness = 0.25;
+
+        ModelCompareResultRow row = Single(Compare(oldSnapshot, newSnapshot).Differences,
+            item => item.ObjectType == ModelCompareObjectType.Area &&
+                    item.ObjectDescription.Contains("/ thickness", StringComparison.OrdinalIgnoreCase));
+        Equal(ModelCompareMemberType.Wall, row.MemberType, "An area assigned an ETABS wall property should be classified as a wall.");
+    }
+
+    private static void UnknownAreaRemainsGeneric()
+    {
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        oldSnapshot.AreaProperties[0].AreaType = "Other";
+        newSnapshot.AreaProperties[0].AreaType = "Other";
+        newSnapshot.Areas[0].Thickness = 0.25;
+
+        ModelCompareResultRow row = Single(Compare(oldSnapshot, newSnapshot).Differences,
+            item => item.ObjectType == ModelCompareObjectType.Area &&
+                    item.ObjectDescription.Contains("/ thickness", StringComparison.OrdinalIgnoreCase));
+        Equal(ModelCompareMemberType.Area, row.MemberType, "An unclassified ETABS area should remain a generic area instead of being guessed.");
+    }
+
+    private static void FailedAreaPropertyDataIsNotTrustedForClassification()
+    {
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        oldSnapshot.Metadata.AreaPropertiesReadStatus = ModelCompareSnapshotReadStatus.Failed;
+        newSnapshot.Metadata.AreaPropertiesReadStatus = ModelCompareSnapshotReadStatus.Failed;
+        newSnapshot.Areas[0].IsOpening = true;
+
+        ModelCompareResultRow row = Single(Compare(oldSnapshot, newSnapshot).Differences,
+            item => item.ObjectType == ModelCompareObjectType.Area &&
+                    item.ObjectDescription.Contains("/ opening", StringComparison.OrdinalIgnoreCase));
+        Equal(ModelCompareMemberType.Area, row.MemberType,
+            "Classification should remain generic when the snapshot says its area-property catalog is incomplete.");
+    }
+
+    private static void WallSlabClassificationChangeStaysMatched()
+    {
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        newSnapshot.AreaProperties[0].AreaType = "Wall";
+
+        ModelCompareComparisonResult result = Compare(oldSnapshot, newSnapshot);
+        False(result.Differences.Any(row => row.ObjectType == ModelCompareObjectType.Area &&
+                row.ChangeType is ModelCompareChangeType.Added or ModelCompareChangeType.Removed),
+            "Changing a matched area from slab to wall must not turn it into an added/removed pair.");
+        ModelCompareResultRow row = Single(result.Differences,
+            item => item.ObjectType == ModelCompareObjectType.Area &&
+                    item.ObjectDescription.Contains("/ classification", StringComparison.OrdinalIgnoreCase));
+        Equal("Slab", row.OldValue, "The old area classification should be slab.");
+        Equal("Wall", row.NewValue, "The new area classification should be wall.");
+        Equal(ModelCompareMemberType.Wall, row.MemberType, "The result should use the compare-model classification.");
+        Equal(ModelCompareMatchMethod.ExactAreaGeometry, row.MatchMethod, "Classification must not replace the existing area identity match.");
+    }
+
+    private static void WallSlabSplitIsNotRepartitioned()
+    {
+        ModelCompareSnapshot oldSnapshot = Load("baseline.json");
+        ModelCompareSnapshot newSnapshot = Load("baseline.json");
+        newSnapshot.AreaProperties[0].AreaType = "Wall";
+        newSnapshot.Areas =
+        [
+            MakeArea("NEW1", "AP1", 0.2, (0, 0, 0), (2, 0, 0), (2, 4, 0), (0, 4, 0)),
+            MakeArea("NEW2", "AP1", 0.2, (2, 0, 0), (4, 0, 0), (4, 4, 0), (2, 4, 0))
+        ];
+
+        List<ModelCompareResultRow> areaRows = Compare(oldSnapshot, newSnapshot).Differences
+            .Where(row => row.ObjectType == ModelCompareObjectType.Area)
+            .ToList();
+        False(areaRows.Any(row => row.ObjectDescription.Contains("re-partitioned", StringComparison.OrdinalIgnoreCase)),
+            "Known wall and slab objects must not be combined by the split/merge fallback.");
+        True(areaRows.Any(row => row.ChangeType == ModelCompareChangeType.Removed),
+            "The old slab should remain unmatched when the replacement objects are known walls.");
+        Equal(2, areaRows.Count(row => row.ChangeType == ModelCompareChangeType.Added),
+            "Both replacement wall objects should be reported as added.");
+        True(areaRows.Where(row => row.ChangeType == ModelCompareChangeType.Added)
+                .All(row => row.MemberType == ModelCompareMemberType.Wall),
+            "The replacement objects should be classified as walls.");
     }
 
     private static void ObjectRowAggregatesFieldChanges()
