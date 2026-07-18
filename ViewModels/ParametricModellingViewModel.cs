@@ -159,6 +159,7 @@ public sealed class ParametricModellingViewModel : ObservableObject
     public ParametricModellingViewModel()
     {
         CityOfTomorrow = new CityOfTomorrowViewModel();
+        CotArch = new CotArchViewModel();
         Dome = new DomeStructureViewModel();
         PlateGirder = new PlateGirderViewModel();
         Railing = new SteelRailingViewModel();
@@ -202,6 +203,7 @@ public sealed class ParametricModellingViewModel : ObservableObject
     }
 
     public CityOfTomorrowViewModel CityOfTomorrow { get; }
+    public CotArchViewModel CotArch { get; }
     public DomeStructureViewModel Dome { get; }
     public PlateGirderViewModel PlateGirder { get; }
     public SteelRailingViewModel Railing { get; }

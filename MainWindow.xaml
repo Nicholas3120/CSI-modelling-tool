@@ -1078,6 +1078,187 @@
                     </GroupBox>
                 </Grid>
             </TabItem>
+            <TabItem Header="CoT Arch" DataContext="{Binding CotArch}">
+                <Grid Margin="12">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="*"/>
+                        <RowDefinition Height="185"/>
+                    </Grid.RowDefinitions>
+
+                    <GroupBox Header="ETABS Connection" Grid.Row="0">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="380"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Button Grid.Column="0" Content="Refresh ETABS Instances" Command="{Binding RefreshEtabsInstancesCommand}"/>
+                            <ComboBox Grid.Column="1" ItemsSource="{Binding EtabsInstances}" SelectedItem="{Binding SelectedEtabsInstance}" DisplayMemberPath="DisplayName"/>
+                            <Button Grid.Column="2" Content="Read ETABS Sections" Command="{Binding ReadEtabsDataCommand}"/>
+                            <TextBlock Grid.Column="3" Margin="8,0,0,0" FontWeight="SemiBold" Foreground="#075985"
+                                       Text="{Binding ConnectionStatus, StringFormat=Status: {0}}"/>
+                        </Grid>
+                    </GroupBox>
+
+                    <Grid Grid.Row="1">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="500"/>
+                            <ColumnDefinition Width="12"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+
+                        <ScrollViewer Grid.Column="0" VerticalScrollBarVisibility="Auto">
+                            <StackPanel>
+                                <GroupBox Header="Tied-Arch Geometry">
+                                    <StackPanel>
+                                        <Grid Margin="0,0,0,4">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="145"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <TextBlock Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Model prefix"/>
+                                            <TextBox Grid.Column="1" Text="{Binding ModelPrefix, UpdateSourceTrigger=PropertyChanged}"/>
+                                        </Grid>
+                                        <controls:SliderNumberInput Label="Origin X" Unit="m" Minimum="-200" Maximum="200" SmallChange="0.5" LargeChange="10" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding OriginX, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Plane Y" Unit="m" Minimum="-200" Maximum="200" SmallChange="0.5" LargeChange="10" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding PlaneY, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Base Z" Unit="m" Minimum="-100" Maximum="100" SmallChange="0.5" LargeChange="5" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding BaseZ, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Springing Z" Unit="m" Minimum="-50" Maximum="200" SmallChange="0.5" LargeChange="5" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding SpringingZ, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Span L" Unit="m" Minimum="1" Maximum="300" SmallChange="0.5" LargeChange="10" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding Span, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Arch rise f" Unit="m" Minimum="0.5" Maximum="80" SmallChange="0.25" LargeChange="2" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding Rise, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Upper beam Z" Unit="m" Minimum="-50" Maximum="250" SmallChange="0.5" LargeChange="5" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding UpperBeamZ, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Post count" Unit="nos" Minimum="3" Maximum="61" SmallChange="1" LargeChange="4" IsInteger="True" LiveTextUpdate="True"
+                                                                    Value="{Binding PostCount, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                        <controls:SliderNumberInput Label="Arch segments / bay" Unit="nos" Minimum="1" Maximum="8" SmallChange="1" LargeChange="1" IsInteger="True" LiveTextUpdate="True"
+                                                                    Value="{Binding ArchSegmentsPerPostBay, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+
+                                        <Grid Margin="0,2,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="145"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Arch profile"/>
+                                            <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding ProfileTypes}" SelectedItem="{Binding SelectedProfileType}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Custom stations"/>
+                                            <TextBox Grid.Row="1" Grid.Column="1" Text="{Binding CustomPostStationsText, UpdateSourceTrigger=PropertyChanged}"/>
+                                        </Grid>
+                                        <controls:SliderNumberInput Label="Power exponent" Unit="" Minimum="1" Maximum="6" SmallChange="0.1" LargeChange="0.5" DecimalPlaces="2" LiveTextUpdate="True"
+                                                                    Value="{Binding ShapeExponent, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
+                                    </StackPanel>
+                                </GroupBox>
+
+                                <GroupBox Header="Behaviour">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="185"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Planar X-Z restraints"/>
+                                        <CheckBox Grid.Row="0" Grid.Column="1" Margin="0,8,0,4" IsChecked="{Binding GenerateAsPlanarModel}"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Base support"/>
+                                        <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding SupportConditions}" SelectedItem="{Binding SelectedSupportCondition}"/>
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Arch releases"/>
+                                        <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedArchReleasePreset}"/>
+                                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Post releases"/>
+                                        <ComboBox Grid.Row="3" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedPostReleasePreset}"/>
+                                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Tie releases"/>
+                                        <ComboBox Grid.Row="4" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedTieReleasePreset}"/>
+                                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Beam releases"/>
+                                        <ComboBox Grid.Row="5" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedBeamReleasePreset}"/>
+                                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Support column releases"/>
+                                        <ComboBox Grid.Row="6" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedSupportColumnReleasePreset}"/>
+                                    </Grid>
+                                </GroupBox>
+
+                                <GroupBox Header="ETABS Frame Sections">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="165"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Arch"/>
+                                        <ComboBox Grid.Row="0" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding ArchSection}"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Vertical posts"/>
+                                        <ComboBox Grid.Row="1" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding PostSection}"/>
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Upper beam"/>
+                                        <ComboBox Grid.Row="2" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding UpperBeamSection}"/>
+                                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Tension tie"/>
+                                        <ComboBox Grid.Row="3" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding TieSection}"/>
+                                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Support columns"/>
+                                        <ComboBox Grid.Row="4" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding SupportColumnSection}"/>
+                                    </Grid>
+                                </GroupBox>
+
+                                <GroupBox Header="Generate in ETABS">
+                                    <StackPanel>
+                                        <WrapPanel Margin="0,0,0,8">
+                                            <Button Content="Validate" Command="{Binding ValidateCommand}"/>
+                                            <Button Content="Generate ETABS Structure" Command="{Binding GenerateStructureCommand}"/>
+                                            <Button Content="Regenerate ETABS Structure" Command="{Binding RegenerateStructureCommand}"/>
+                                            <Button Content="Clear ETABS Structure" Command="{Binding ClearGeneratedStructureCommand}"/>
+                                        </WrapPanel>
+                                        <TextBlock Text="{Binding GenerationReport}" TextWrapping="Wrap" FontWeight="Normal" Foreground="#475569"/>
+                                    </StackPanel>
+                                </GroupBox>
+                            </StackPanel>
+                        </ScrollViewer>
+
+                        <Grid Grid.Column="2">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <GroupBox Header="Calculated Geometry" Grid.Row="0">
+                                <WrapPanel>
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Arch segments:"/>
+                                    <TextBlock Style="{StaticResource FieldValue}" Text="{Binding ArchSegmentCount}" Margin="0,7,18,3"/>
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Posts:"/>
+                                    <TextBlock Style="{StaticResource FieldValue}" Text="{Binding VerticalPostCount}" Margin="0,7,18,3"/>
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Beam segments:"/>
+                                    <TextBlock Style="{StaticResource FieldValue}" Text="{Binding UpperBeamSegmentCount}" Margin="0,7,18,3"/>
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Points:"/>
+                                    <TextBlock Style="{StaticResource FieldValue}" Text="{Binding NodeCount}" Margin="0,7,18,3"/>
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Frames:"/>
+                                    <TextBlock Style="{StaticResource FieldValue}" Text="{Binding FrameCount}" Margin="0,7,18,3"/>
+                                    <TextBlock Style="{StaticResource FieldLabel}" Text="Group:"/>
+                                    <TextBlock Style="{StaticResource FieldValue}" Text="{Binding GroupName}"/>
+                                </WrapPanel>
+                            </GroupBox>
+                            <GroupBox Grid.Row="1" Header="Live 2D X-Z Topology Preview">
+                                <controls:CotArchPreviewControl Model="{Binding CurrentModel}" MinHeight="430"/>
+                            </GroupBox>
+                        </Grid>
+                    </Grid>
+
+                    <GroupBox Grid.Row="2" Header="Geometry / ETABS Validation" Margin="0,10,0,0">
+                        <DataGrid ItemsSource="{Binding Messages}" AutoGenerateColumns="False" IsReadOnly="True" CanUserAddRows="False" GridLinesVisibility="Horizontal">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Severity" Binding="{Binding SeverityText}" Width="95"/>
+                                <DataGridTextColumn Header="Message" Binding="{Binding Message}" Width="*"/>
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </GroupBox>
+                </Grid>
+            </TabItem>
             <TabItem Header="ETABS Model Setup">
                 <TabControl Margin="0">
                 <TabItem Header="Frame Assignments">

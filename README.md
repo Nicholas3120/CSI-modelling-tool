@@ -182,6 +182,27 @@ SAP2000 features:
 
 The tab also shows calculated panel count, panel width, node count, frame count, tension-only count, group name, preview geometry, and validation messages.
 
+### CoT Arch
+
+The `CoT Arch` tab generates a parametric tied-arch transfer structure into an already-open ETABS model.
+
+Geometry inputs:
+
+- Model prefix, origin X, plane Y, base elevation, springing elevation, span, rise, upper-beam elevation, post count, arch segments per post bay, arch profile, optional custom post stations, and power-curve exponent.
+- ETABS frame sections for the segmented compression arch, vertical posts, upper horizontal beam, tension tie, and support columns.
+- Planar X-Z restraint option, base support condition, and per-member release presets.
+
+ETABS features:
+
+- Reads frame sections from the selected running ETABS instance.
+- Validates section names before writing and does not silently fall back to `Default`.
+- Stops if the selected ETABS model is locked; unlock the model in ETABS before generation.
+- Creates shared springing joints for the arch, tie, end posts, and support columns.
+- Creates the upper beam only between the two end-post top joints, with no overhang.
+- Saves a local CoT Arch manifest so regenerate and clear operations target generated objects only.
+
+The tab also shows calculated arch segment count, post count, beam segment count, node count, frame count, group name, preview geometry, and validation messages.
+
 ### ETABS Model Setup
 
 This top-level tab currently groups ETABS setup/editing workflows.
