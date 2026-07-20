@@ -924,38 +924,33 @@
                         <RowDefinition Height="185"/>
                     </Grid.RowDefinitions>
 
-                    <StackPanel Grid.Row="0">
-                        <GroupBox Header="ETABS Connection">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="380"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Button Grid.Column="0" Content="Refresh ETABS Instances" Command="{Binding RefreshEtabsInstancesCommand}"/>
-                                <ComboBox Grid.Column="1" ItemsSource="{Binding EtabsInstances}" SelectedItem="{Binding SelectedEtabsInstance}" DisplayMemberPath="DisplayName"/>
-                                <Button Grid.Column="2" Content="Read ETABS Sections" Command="{Binding ReadEtabsDataCommand}"/>
-                                <TextBlock Grid.Column="3" Margin="8,0,0,0" FontWeight="SemiBold" Foreground="#075985"
-                                           Text="{Binding ConnectionStatus, StringFormat=Status: {0}}"/>
-                            </Grid>
-                        </GroupBox>
-                        <GroupBox Header="SAP2000 Connection" Margin="0,8,0,0">
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="380"/>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Button Grid.Column="0" Content="Refresh SAP2000 Instances" Command="{Binding RefreshSap2000InstancesCommand}"/>
-                                <ComboBox Grid.Column="1" ItemsSource="{Binding Sap2000Instances}" SelectedItem="{Binding SelectedSap2000Instance}" DisplayMemberPath="DisplayName"/>
-                                <Button Grid.Column="2" Content="Read SAP2000 Sections" Command="{Binding ReadSap2000DataCommand}"/>
-                                <TextBlock Grid.Column="3" Margin="8,0,0,0" FontWeight="SemiBold" Foreground="#075985"
-                                           Text="{Binding Sap2000ConnectionStatus, StringFormat=Status: {0}}"/>
-                            </Grid>
-                        </GroupBox>
-                    </StackPanel>
+                    <GroupBox Header="CSI Connections" Grid.Row="0">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="70"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="360"/>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldValue}" Text="ETABS"/>
+                            <Button Grid.Row="0" Grid.Column="1" Content="Refresh Instances" Command="{Binding RefreshEtabsInstancesCommand}"/>
+                            <ComboBox Grid.Row="0" Grid.Column="2" ItemsSource="{Binding EtabsInstances}" SelectedItem="{Binding SelectedEtabsInstance}" DisplayMemberPath="DisplayName"/>
+                            <Button Grid.Row="0" Grid.Column="3" Content="Read ETABS Sections" Command="{Binding ReadEtabsDataCommand}"/>
+                            <TextBlock Grid.Row="0" Grid.Column="4" Margin="8,0,0,0" FontWeight="SemiBold" Foreground="#075985"
+                                       Text="{Binding ConnectionStatus, StringFormat=Status: {0}}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldValue}" Text="SAP2000"/>
+                            <Button Grid.Row="1" Grid.Column="1" Content="Refresh Instances" Command="{Binding RefreshSap2000InstancesCommand}"/>
+                            <ComboBox Grid.Row="1" Grid.Column="2" ItemsSource="{Binding Sap2000Instances}" SelectedItem="{Binding SelectedSap2000Instance}" DisplayMemberPath="DisplayName"/>
+                            <Button Grid.Row="1" Grid.Column="3" Content="Read SAP2000 Sections" Command="{Binding ReadSap2000DataCommand}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="4" Margin="8,0,0,0" FontWeight="SemiBold" Foreground="#075985"
+                                       Text="{Binding Sap2000ConnectionStatus, StringFormat=Status: {0}}"/>
+                        </Grid>
+                    </GroupBox>
 
                     <Grid Grid.Row="1">
                         <Grid.ColumnDefinitions>
@@ -992,12 +987,12 @@
                                                                     Value="{Binding ExternalAnchorWidth, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                         <controls:SliderNumberInput Label="Side-frame height" Unit="m" Minimum="1" Maximum="100" SmallChange="0.5" LargeChange="5" DecimalPlaces="2" LiveTextUpdate="True"
                                                                     Value="{Binding ExternalSideFrameHeight, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
-                                        <controls:SliderNumberInput Label="Pile-cap Z" Unit="m" Minimum="-50" Maximum="100" SmallChange="0.5" LargeChange="5" DecimalPlaces="2" LiveTextUpdate="True"
+                                        <controls:SliderNumberInput Label="Tower base Z" Unit="m" Minimum="-50" Maximum="100" SmallChange="0.5" LargeChange="5" DecimalPlaces="2" LiveTextUpdate="True"
                                                                     Value="{Binding PileCapLevelZ, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"/>
                                     </StackPanel>
                                 </GroupBox>
 
-                                <GroupBox Header="CSI Frame Sections">
+                                <GroupBox Header="Behaviour">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="165"/>
@@ -1006,37 +1001,150 @@
                                         <Grid.RowDefinitions>
                                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                         </Grid.RowDefinitions>
-                                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Top chord"/>
-                                        <ComboBox Grid.Row="0" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding TopChordSection}"/>
-                                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Intermediate rail"/>
-                                        <ComboBox Grid.Row="1" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding MidRailSection}"/>
-                                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Bottom chord"/>
-                                        <ComboBox Grid.Row="2" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding BottomChordSection}"/>
-                                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Vertical posts"/>
-                                        <ComboBox Grid.Row="3" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding VerticalPostSection}"/>
-                                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Tower / piles"/>
-                                        <ComboBox Grid.Row="4" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding TowerSection}"/>
-                                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Side frames"/>
-                                        <ComboBox Grid.Row="5" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding SideFrameSection}"/>
-                                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Cable / backstay"/>
-                                        <ComboBox Grid.Row="6" Grid.Column="1" MinWidth="0" ItemsSource="{Binding TensionMemberSections}" SelectedItem="{Binding CableSection}"/>
-                                        <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Global tie / tendon"/>
-                                        <ComboBox Grid.Row="7" Grid.Column="1" MinWidth="0" ItemsSource="{Binding TensionMemberSections}" SelectedItem="{Binding TieCableSection}"/>
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Base support"/>
+                                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource FieldValue}" Text="Pinned"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Top chord releases"/>
+                                        <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedTopChordReleasePreset}"/>
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Intermediate rail releases"/>
+                                        <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedMidRailReleasePreset}"/>
+                                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Bottom chord releases"/>
+                                        <ComboBox Grid.Row="3" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedBottomChordReleasePreset}"/>
+                                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Vertical post releases"/>
+                                        <ComboBox Grid.Row="4" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedVerticalPostReleasePreset}"/>
+                                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Tower releases"/>
+                                        <ComboBox Grid.Row="5" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedTowerReleasePreset}"/>
+                                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Side strut releases"/>
+                                        <ComboBox Grid.Row="6" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedSideFrameReleasePreset}"/>
+                                        <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Side vertical releases"/>
+                                        <ComboBox Grid.Row="7" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedSideVerticalReleasePreset}"/>
+                                        <TextBlock Grid.Row="8" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Side X1 releases"/>
+                                        <ComboBox Grid.Row="8" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedSideX1ReleasePreset}"/>
+                                        <TextBlock Grid.Row="9" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Side X2 releases"/>
+                                        <ComboBox Grid.Row="9" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedSideX2ReleasePreset}"/>
+                                        <TextBlock Grid.Row="10" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Cable / backstay releases"/>
+                                        <ComboBox Grid.Row="10" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedCableReleasePreset}"/>
+                                        <TextBlock Grid.Row="11" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Global tie releases"/>
+                                        <ComboBox Grid.Row="11" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedTieReleasePreset}"/>
                                     </Grid>
                                 </GroupBox>
 
-                                <GroupBox Header="Generate in CSI Products">
+                                <GroupBox Header="CSI Member Sections">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="165"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Top chord"/>
+                                        <ComboBox Grid.Row="0" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameOrTensionSections}" SelectedItem="{Binding TopChordSection}"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Intermediate rail"/>
+                                        <ComboBox Grid.Row="1" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameOrTensionSections}" SelectedItem="{Binding MidRailSection}"/>
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Bottom chord"/>
+                                        <ComboBox Grid.Row="2" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameOrTensionSections}" SelectedItem="{Binding BottomChordSection}"/>
+                                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Vertical posts"/>
+                                        <ComboBox Grid.Row="3" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameOrTensionSections}" SelectedItem="{Binding VerticalPostSection}"/>
+                                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Tower"/>
+                                        <ComboBox Grid.Row="4" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameOrTensionSections}" SelectedItem="{Binding TowerSection}"/>
+                                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Side strut"/>
+                                        <ComboBox Grid.Row="5" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameOrTensionSections}" SelectedItem="{Binding SideFrameSection}"/>
+                                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Side vertical"/>
+                                        <ComboBox Grid.Row="6" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameOrTensionSections}" SelectedItem="{Binding SideVerticalSection}"/>
+                                        <TextBlock Grid.Row="7" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Side X1"/>
+                                        <ComboBox Grid.Row="7" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameOrTensionSections}" SelectedItem="{Binding SideX1Section}"/>
+                                        <TextBlock Grid.Row="8" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Side X2"/>
+                                        <ComboBox Grid.Row="8" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameOrTensionSections}" SelectedItem="{Binding SideX2Section}"/>
+                                        <TextBlock Grid.Row="9" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Cable / backstay"/>
+                                        <ComboBox Grid.Row="9" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameOrTensionSections}" SelectedItem="{Binding CableSection}"/>
+                                        <TextBlock Grid.Row="10" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Global tie / tendon"/>
+                                        <ComboBox Grid.Row="10" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameOrTensionSections}" SelectedItem="{Binding TieCableSection}"/>
+                                    </Grid>
+                                </GroupBox>
+
+                                <GroupBox Header="Top Chord Loading">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="165"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Load type"/>
+                                        <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding TopChordLoadTypes}" SelectedItem="{Binding SelectedTopChordLoadType}"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Load pattern" Visibility="{Binding TopChordLoadInputVisibility}"/>
+                                        <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding LoadPatterns}" SelectedItem="{Binding SelectedLoadPattern}" Visibility="{Binding TopChordLoadInputVisibility}"/>
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="UDL down kN/m" Visibility="{Binding TopChordUdlInputVisibility}"/>
+                                        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding TopChordUdlKnPerM, UpdateSourceTrigger=LostFocus, StringFormat=0.###}" Visibility="{Binding TopChordUdlInputVisibility}"/>
+                                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Point down kN/joint" Visibility="{Binding TopChordPointLoadInputVisibility}"/>
+                                        <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding TopChordPointLoadKn, UpdateSourceTrigger=LostFocus, StringFormat=0.###}" Visibility="{Binding TopChordPointLoadInputVisibility}"/>
+                                        <Grid Grid.Row="4" Grid.Column="1" Margin="0,6,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="8"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Button Grid.Column="0" Content="Update ETABS Loads" Command="{Binding UpdateLoadsCommand}"/>
+                                            <Button Grid.Column="2" Content="Update SAP2000 Loads" Command="{Binding UpdateSap2000LoadsCommand}"/>
+                                        </Grid>
+                                        <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Style="{StaticResource FieldValue}" Text="Applied loads" Margin="0,10,0,0"/>
+                                        <DataGrid Grid.Row="6" Grid.ColumnSpan="2"
+                                                  ItemsSource="{Binding AppliedTopChordLoads}"
+                                                  AutoGenerateColumns="False"
+                                                  IsReadOnly="True"
+                                                  CanUserAddRows="False"
+                                                  HeadersVisibility="Column"
+                                                  GridLinesVisibility="Horizontal"
+                                                  MaxHeight="120"
+                                                  Margin="0,4,0,0">
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Pattern" Binding="{Binding LoadPattern}" Width="90"/>
+                                                <DataGridTextColumn Header="Type" Binding="{Binding LoadType}" Width="65"/>
+                                                <DataGridTextColumn Header="Value" Binding="{Binding ValueText}" Width="*"/>
+                                                <DataGridTextColumn Header="Targets" Binding="{Binding TargetText}" Width="110"/>
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                        <TextBlock Grid.Row="7" Grid.ColumnSpan="2"
+                                                   Text="{Binding AppliedTopChordLoadStatus}"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="#64748B"
+                                                   Margin="0,4,0,0"/>
+                                    </Grid>
+                                </GroupBox>
+
+                                <GroupBox Header="Generate">
                                     <StackPanel>
-                                        <WrapPanel Margin="0,0,0,8">
-                                            <Button Content="Validate" Command="{Binding ValidateCommand}"/>
-                                            <Button Content="Generate New ETABS Model" Command="{Binding GenerateNewModelCommand}"/>
-                                            <Button Content="Regenerate ETABS Structure" Command="{Binding RegenerateStructureCommand}"/>
-                                            <Button Content="Clear ETABS Structure" Command="{Binding ClearGeneratedStructureCommand}"/>
-                                            <Button Content="Generate New SAP2000 Model" Command="{Binding GenerateNewSap2000ModelCommand}"/>
-                                            <Button Content="Regenerate SAP2000 Structure" Command="{Binding RegenerateSap2000StructureCommand}"/>
-                                            <Button Content="Clear SAP2000 Structure" Command="{Binding ClearSap2000StructureCommand}"/>
-                                        </WrapPanel>
+                                        <Grid Margin="0,0,0,8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0">
+                                                <TextBlock Style="{StaticResource FieldValue}" Text="ETABS"/>
+                                                <Button Content="Generate" Command="{Binding GenerateNewModelCommand}" Margin="0,4,0,4"/>
+                                                <Button Content="Regenerate" Command="{Binding RegenerateStructureCommand}" Margin="0,0,0,4"/>
+                                                <Button Content="Clear" Command="{Binding ClearGeneratedStructureCommand}" Margin="0"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2">
+                                                <TextBlock Style="{StaticResource FieldValue}" Text="SAP2000"/>
+                                                <Button Content="Generate" Command="{Binding GenerateNewSap2000ModelCommand}" Margin="0,4,0,4"/>
+                                                <Button Content="Regenerate" Command="{Binding RegenerateSap2000StructureCommand}" Margin="0,0,0,4"/>
+                                                <Button Content="Clear" Command="{Binding ClearSap2000StructureCommand}" Margin="0"/>
+                                            </StackPanel>
+                                        </Grid>
                                         <TextBlock Text="{Binding GenerationReport}" TextWrapping="Wrap" FontWeight="Normal" Foreground="#475569"/>
                                     </StackPanel>
                                 </GroupBox>
@@ -1086,19 +1194,31 @@
                         <RowDefinition Height="185"/>
                     </Grid.RowDefinitions>
 
-                    <GroupBox Header="ETABS Connection" Grid.Row="0">
+                    <GroupBox Header="CSI Connections" Grid.Row="0">
                         <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
                             <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="70"/>
                                 <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="380"/>
+                                <ColumnDefinition Width="360"/>
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <Button Grid.Column="0" Content="Refresh ETABS Instances" Command="{Binding RefreshEtabsInstancesCommand}"/>
-                            <ComboBox Grid.Column="1" ItemsSource="{Binding EtabsInstances}" SelectedItem="{Binding SelectedEtabsInstance}" DisplayMemberPath="DisplayName"/>
-                            <Button Grid.Column="2" Content="Read ETABS Sections" Command="{Binding ReadEtabsDataCommand}"/>
-                            <TextBlock Grid.Column="3" Margin="8,0,0,0" FontWeight="SemiBold" Foreground="#075985"
+                            <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldValue}" Text="ETABS"/>
+                            <Button Grid.Row="0" Grid.Column="1" Content="Refresh Instances" Command="{Binding RefreshEtabsInstancesCommand}"/>
+                            <ComboBox Grid.Row="0" Grid.Column="2" ItemsSource="{Binding EtabsInstances}" SelectedItem="{Binding SelectedEtabsInstance}" DisplayMemberPath="DisplayName"/>
+                            <Button Grid.Row="0" Grid.Column="3" Content="Read ETABS Data" Command="{Binding ReadEtabsDataCommand}"/>
+                            <TextBlock Grid.Row="0" Grid.Column="4" Margin="8,0,0,0" FontWeight="SemiBold" Foreground="#075985"
                                        Text="{Binding ConnectionStatus, StringFormat=Status: {0}}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldValue}" Text="SAP2000"/>
+                            <Button Grid.Row="1" Grid.Column="1" Content="Refresh Instances" Command="{Binding RefreshSap2000InstancesCommand}"/>
+                            <ComboBox Grid.Row="1" Grid.Column="2" ItemsSource="{Binding Sap2000Instances}" SelectedItem="{Binding SelectedSap2000Instance}" DisplayMemberPath="DisplayName"/>
+                            <Button Grid.Row="1" Grid.Column="3" Content="Read SAP2000 Data" Command="{Binding ReadSap2000DataCommand}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="4" Margin="8,0,0,0" FontWeight="SemiBold" Foreground="#075985"
+                                       Text="{Binding Sap2000ConnectionStatus, StringFormat=Status: {0}}"/>
                         </Grid>
                     </GroupBox>
 
@@ -1166,27 +1286,25 @@
                                             <ColumnDefinition Width="*"/>
                                         </Grid.ColumnDefinitions>
                                         <Grid.RowDefinitions>
-                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                         </Grid.RowDefinitions>
-                                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Planar X-Z restraints"/>
-                                        <CheckBox Grid.Row="0" Grid.Column="1" Margin="0,8,0,4" IsChecked="{Binding GenerateAsPlanarModel}"/>
-                                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Base support"/>
-                                        <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding SupportConditions}" SelectedItem="{Binding SelectedSupportCondition}"/>
-                                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Arch releases"/>
-                                        <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedArchReleasePreset}"/>
-                                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Post releases"/>
-                                        <ComboBox Grid.Row="3" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedPostReleasePreset}"/>
-                                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Tie releases"/>
-                                        <ComboBox Grid.Row="4" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedTieReleasePreset}"/>
-                                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Beam releases"/>
-                                        <ComboBox Grid.Row="5" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedBeamReleasePreset}"/>
-                                        <TextBlock Grid.Row="6" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Support column releases"/>
-                                        <ComboBox Grid.Row="6" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedSupportColumnReleasePreset}"/>
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Base support"/>
+                                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource FieldValue}" Text="Pinned"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Arch releases"/>
+                                        <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedArchReleasePreset}"/>
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Post releases"/>
+                                        <ComboBox Grid.Row="2" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedPostReleasePreset}"/>
+                                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Tie releases"/>
+                                        <ComboBox Grid.Row="3" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedTieReleasePreset}"/>
+                                        <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Beam releases"/>
+                                        <ComboBox Grid.Row="4" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedBeamReleasePreset}"/>
+                                        <TextBlock Grid.Row="5" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Support column releases"/>
+                                        <ComboBox Grid.Row="5" Grid.Column="1" ItemsSource="{Binding ReleasePresets}" SelectedItem="{Binding SelectedSupportColumnReleasePreset}"/>
                                     </Grid>
                                 </GroupBox>
 
-                                <GroupBox Header="ETABS Frame Sections">
+                                <GroupBox Header="CSI Member Sections">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="165"/>
@@ -1196,26 +1314,97 @@
                                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                         </Grid.RowDefinitions>
                                         <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Arch"/>
-                                        <ComboBox Grid.Row="0" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding ArchSection}"/>
+                                        <ComboBox Grid.Row="0" Grid.Column="1" MinWidth="0" ItemsSource="{Binding TensionMemberSections}" SelectedItem="{Binding ArchSection}"/>
                                         <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Vertical posts"/>
-                                        <ComboBox Grid.Row="1" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding PostSection}"/>
+                                        <ComboBox Grid.Row="1" Grid.Column="1" MinWidth="0" ItemsSource="{Binding TensionMemberSections}" SelectedItem="{Binding PostSection}"/>
                                         <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Upper beam"/>
-                                        <ComboBox Grid.Row="2" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding UpperBeamSection}"/>
+                                        <ComboBox Grid.Row="2" Grid.Column="1" MinWidth="0" ItemsSource="{Binding TensionMemberSections}" SelectedItem="{Binding UpperBeamSection}"/>
                                         <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Tension tie"/>
-                                        <ComboBox Grid.Row="3" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding TieSection}"/>
+                                        <ComboBox Grid.Row="3" Grid.Column="1" MinWidth="0" ItemsSource="{Binding TensionMemberSections}" SelectedItem="{Binding TieSection}"/>
                                         <TextBlock Grid.Row="4" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Support columns"/>
-                                        <ComboBox Grid.Row="4" Grid.Column="1" MinWidth="0" ItemsSource="{Binding FrameSections}" SelectedItem="{Binding SupportColumnSection}"/>
+                                        <ComboBox Grid.Row="4" Grid.Column="1" MinWidth="0" ItemsSource="{Binding TensionMemberSections}" SelectedItem="{Binding SupportColumnSection}"/>
                                     </Grid>
                                 </GroupBox>
 
-                                <GroupBox Header="Generate in ETABS">
+                                <GroupBox Header="Upper Beam Loading">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="165"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Grid.Row="0" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Load type"/>
+                                        <ComboBox Grid.Row="0" Grid.Column="1" ItemsSource="{Binding UpperBeamLoadTypes}" SelectedItem="{Binding SelectedUpperBeamLoadType}"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Load pattern" Visibility="{Binding UpperBeamLoadInputVisibility}"/>
+                                        <ComboBox Grid.Row="1" Grid.Column="1" ItemsSource="{Binding LoadPatterns}" SelectedItem="{Binding SelectedLoadPattern}" Visibility="{Binding UpperBeamLoadInputVisibility}"/>
+                                        <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="UDL down kN/m" Visibility="{Binding UpperBeamUdlInputVisibility}"/>
+                                        <TextBox Grid.Row="2" Grid.Column="1" Text="{Binding UpperBeamUdlKnPerM, UpdateSourceTrigger=LostFocus, StringFormat=0.###}" Visibility="{Binding UpperBeamUdlInputVisibility}"/>
+                                        <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Point down kN/joint" Visibility="{Binding UpperBeamPointLoadInputVisibility}"/>
+                                        <TextBox Grid.Row="3" Grid.Column="1" Text="{Binding UpperBeamPointLoadKn, UpdateSourceTrigger=LostFocus, StringFormat=0.###}" Visibility="{Binding UpperBeamPointLoadInputVisibility}"/>
+                                        <Grid Grid.Row="4" Grid.Column="1" Margin="0,6,0,0">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="8"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Button Grid.Column="0" Content="Update ETABS Loads" Command="{Binding UpdateLoadsCommand}"/>
+                                            <Button Grid.Column="2" Content="Update SAP2000 Loads" Command="{Binding UpdateSap2000LoadsCommand}"/>
+                                        </Grid>
+                                        <TextBlock Grid.Row="5" Grid.ColumnSpan="2" Style="{StaticResource FieldValue}" Text="Applied loads" Margin="0,10,0,0"/>
+                                        <DataGrid Grid.Row="6" Grid.ColumnSpan="2"
+                                                  ItemsSource="{Binding AppliedUpperBeamLoads}"
+                                                  AutoGenerateColumns="False"
+                                                  IsReadOnly="True"
+                                                  CanUserAddRows="False"
+                                                  HeadersVisibility="Column"
+                                                  GridLinesVisibility="Horizontal"
+                                                  MaxHeight="120"
+                                                  Margin="0,4,0,0">
+                                            <DataGrid.Columns>
+                                                <DataGridTextColumn Header="Pattern" Binding="{Binding LoadPattern}" Width="90"/>
+                                                <DataGridTextColumn Header="Type" Binding="{Binding LoadType}" Width="65"/>
+                                                <DataGridTextColumn Header="Value" Binding="{Binding ValueText}" Width="*"/>
+                                                <DataGridTextColumn Header="Targets" Binding="{Binding TargetText}" Width="110"/>
+                                            </DataGrid.Columns>
+                                        </DataGrid>
+                                        <TextBlock Grid.Row="7" Grid.ColumnSpan="2"
+                                                   Text="{Binding AppliedUpperBeamLoadStatus}"
+                                                   TextWrapping="Wrap"
+                                                   Foreground="#64748B"
+                                                   Margin="0,4,0,0"/>
+                                    </Grid>
+                                </GroupBox>
+
+                                <GroupBox Header="Generate">
                                     <StackPanel>
-                                        <WrapPanel Margin="0,0,0,8">
-                                            <Button Content="Validate" Command="{Binding ValidateCommand}"/>
-                                            <Button Content="Generate ETABS Structure" Command="{Binding GenerateStructureCommand}"/>
-                                            <Button Content="Regenerate ETABS Structure" Command="{Binding RegenerateStructureCommand}"/>
-                                            <Button Content="Clear ETABS Structure" Command="{Binding ClearGeneratedStructureCommand}"/>
-                                        </WrapPanel>
+                                        <Grid Margin="0,0,0,8">
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*"/>
+                                                <ColumnDefinition Width="12"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <StackPanel Grid.Column="0">
+                                                <TextBlock Style="{StaticResource FieldValue}" Text="ETABS"/>
+                                                <Button Content="Generate" Command="{Binding GenerateStructureCommand}" Margin="0,4,0,4"/>
+                                                <Button Content="Regenerate" Command="{Binding RegenerateStructureCommand}" Margin="0,0,0,4"/>
+                                                <Button Content="Clear" Command="{Binding ClearGeneratedStructureCommand}" Margin="0"/>
+                                            </StackPanel>
+                                            <StackPanel Grid.Column="2">
+                                                <TextBlock Style="{StaticResource FieldValue}" Text="SAP2000"/>
+                                                <Button Content="Generate" Command="{Binding GenerateSap2000StructureCommand}" Margin="0,4,0,4"/>
+                                                <Button Content="Regenerate" Command="{Binding RegenerateSap2000StructureCommand}" Margin="0,0,0,4"/>
+                                                <Button Content="Clear" Command="{Binding ClearSap2000StructureCommand}" Margin="0"/>
+                                            </StackPanel>
+                                        </Grid>
                                         <TextBlock Text="{Binding GenerationReport}" TextWrapping="Wrap" FontWeight="Normal" Foreground="#475569"/>
                                     </StackPanel>
                                 </GroupBox>

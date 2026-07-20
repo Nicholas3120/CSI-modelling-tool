@@ -53,13 +53,16 @@ public sealed class CotArchGeometryBuilder
         for (int index = 0; index < postStations.Count; index++)
         {
             double xi = postStations[index];
-            CotArchNode top = AddNode(
-                model,
-                $"{prefix}_P_TOP_{index:000}",
-                normalizedInput.OriginX + xi * normalizedInput.Span,
-                normalizedInput.PlaneY,
-                normalizedInput.UpperBeamZ,
-                xi);
+            CotArchNode bottom = model.PostBottomNodes[index];
+            CotArchNode top = Math.Abs(normalizedInput.UpperBeamZ - bottom.Z) <= Tolerance
+                ? bottom
+                : AddNode(
+                    model,
+                    $"{prefix}_P_TOP_{index:000}",
+                    normalizedInput.OriginX + xi * normalizedInput.Span,
+                    normalizedInput.PlaneY,
+                    normalizedInput.UpperBeamZ,
+                    xi);
             top.IsPostTop = true;
             model.PostTopNodes.Add(top);
         }
@@ -89,6 +92,9 @@ public sealed class CotArchGeometryBuilder
 
         for (int index = 0; index < model.PostBottomNodes.Count; index++)
         {
+            if (Distance(model.PostBottomNodes[index], model.PostTopNodes[index]) <= Tolerance)
+                continue;
+
             AddMember(
                 model,
                 $"{prefix}_F_POST_{index:000}",
@@ -231,7 +237,11 @@ public sealed class CotArchGeometryBuilder
             PostReleasePreset = input.PostReleasePreset,
             TieReleasePreset = input.TieReleasePreset,
             BeamReleasePreset = input.BeamReleasePreset,
-            SupportColumnReleasePreset = input.SupportColumnReleasePreset
+            SupportColumnReleasePreset = input.SupportColumnReleasePreset,
+            UpperBeamLoadType = input.UpperBeamLoadType,
+            UpperBeamLoadPattern = input.UpperBeamLoadPattern ?? "",
+            UpperBeamUdlKnPerM = Math.Abs(Finite(input.UpperBeamUdlKnPerM, 0)),
+            UpperBeamPointLoadKn = Math.Abs(Finite(input.UpperBeamPointLoadKn, 0))
         };
     }
 
@@ -262,6 +272,14 @@ public sealed class CotArchGeometryBuilder
             SectionName = sectionName ?? "",
             ReleasePreset = releasePreset
         });
+    }
+
+    private static double Distance(CotArchNode start, CotArchNode end)
+    {
+        double dx = end.X - start.X;
+        double dy = end.Y - start.Y;
+        double dz = end.Z - start.Z;
+        return Math.Sqrt(dx * dx + dy * dy + dz * dz);
     }
 
     private static string BuildArchNodeId(string prefix, int index, int count)

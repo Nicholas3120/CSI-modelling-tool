@@ -36,6 +36,7 @@ public sealed class Sap2000ModelDataResult
     public List<string> CableSections { get; set; } = [];
     public List<string> TendonSections { get; set; } = [];
     public List<string> TensionMemberSections { get; set; } = [];
+    public List<string> LoadPatterns { get; set; } = [];
     public List<string> Groups { get; set; } = [];
     public List<string> Warnings { get; set; } = [];
 }
@@ -47,8 +48,34 @@ public sealed class Sap2000CityOfTomorrowDrawRequest
     public bool ReplaceExistingStructure { get; set; }
 }
 
+public sealed class Sap2000CityOfTomorrowLoadUpdateRequest
+{
+    public string? Sap2000InstanceId { get; set; }
+    public CityOfTomorrowModel Model { get; set; } = new();
+}
+
 public sealed class Sap2000CityOfTomorrowClearRequest
 {
     public string? Sap2000InstanceId { get; set; }
+    public string GroupName { get; set; } = "";
+}
+
+public sealed class Sap2000CotArchDrawRequest
+{
+    public string? Sap2000InstanceId { get; set; }
+    public CotArchModel Model { get; set; } = new();
+    public bool ReplaceExistingStructure { get; set; }
+}
+
+public sealed class Sap2000CotArchLoadUpdateRequest
+{
+    public string? Sap2000InstanceId { get; set; }
+    public CotArchModel Model { get; set; } = new();
+}
+
+public sealed class Sap2000CotArchClearRequest
+{
+    public string? Sap2000InstanceId { get; set; }
+    public string ModelPrefix { get; set; } = "";
     public string GroupName { get; set; } = "";
 }

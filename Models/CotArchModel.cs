@@ -28,6 +28,13 @@ public enum CotArchMemberKind
     SupportColumn
 }
 
+public enum CotArchUpperBeamLoadType
+{
+    None,
+    Udl,
+    PointLoadAtJoints
+}
+
 public static class CotArchMemberGroups
 {
     public const string Arch = "Segmented compression arch";
@@ -65,6 +72,10 @@ public sealed class CotArchInput
     public CotArchMemberReleasePreset TieReleasePreset { get; set; } = CotArchMemberReleasePreset.PinnedBothEnds;
     public CotArchMemberReleasePreset BeamReleasePreset { get; set; } = CotArchMemberReleasePreset.FullyContinuous;
     public CotArchMemberReleasePreset SupportColumnReleasePreset { get; set; } = CotArchMemberReleasePreset.FullyContinuous;
+    public CotArchUpperBeamLoadType UpperBeamLoadType { get; set; } = CotArchUpperBeamLoadType.None;
+    public string UpperBeamLoadPattern { get; set; } = "";
+    public double UpperBeamUdlKnPerM { get; set; }
+    public double UpperBeamPointLoadKn { get; set; }
 }
 
 public sealed class CotArchNode
@@ -127,6 +138,12 @@ public sealed class CotArchDrawRequest
     public bool ReplaceExistingStructure { get; set; }
 }
 
+public sealed class CotArchLoadUpdateRequest
+{
+    public string? EtabsInstanceId { get; set; }
+    public CotArchModel Model { get; set; } = new();
+}
+
 public sealed class CotArchDrawResult
 {
     public bool IsError { get; set; }
@@ -135,7 +152,16 @@ public sealed class CotArchDrawResult
     public string GroupName { get; set; } = "";
     public List<string> FrameObjectNames { get; set; } = [];
     public List<string> PointObjectNames { get; set; } = [];
+    public List<CotArchAppliedUpperBeamLoad> AppliedUpperBeamLoads { get; set; } = [];
     public List<string> Warnings { get; set; } = [];
+}
+
+public sealed class CotArchAppliedUpperBeamLoad
+{
+    public string LoadPattern { get; set; } = "";
+    public string LoadType { get; set; } = "";
+    public string ValueText { get; set; } = "";
+    public string TargetText { get; set; } = "";
 }
 
 public sealed class CotArchClearRequest

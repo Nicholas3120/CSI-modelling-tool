@@ -13,6 +13,7 @@ public sealed partial class EtabsParametricModellingService
         var createdPoints = new List<string>();
         var reusedPoints = new List<string>();
         var frameMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var appliedUpperBeamLoads = new List<CotArchAppliedUpperBeamLoad>();
 
         try
         {
@@ -22,12 +23,14 @@ public sealed partial class EtabsParametricModellingService
 
             ETABSv1.cSapModel sapModel = GetRequiredSapModelObject(GetEtabsObject(request.EtabsInstanceId));
             ETABSv1.eUnits? originalUnits = TryGetPresentUnits(sapModel);
+            bool refreshViewAfterDraw = false;
 
             try
             {
                 TrySetPresentUnitsToKnM(sapModel, warnings);
                 TryUnlockModelForDrawing(sapModel, warnings);
                 ValidateCotArchFrameSections(sapModel, model, warnings);
+                ValidateCotArchLoadPattern(sapModel, model, warnings);
 
                 string mainGroup = EnsureEtabsDrawGroup(sapModel, model.GroupName, warnings);
                 Dictionary<CotArchMemberKind, string> memberGroups = EnsureCotArchGroups(sapModel, model, warnings);
@@ -61,11 +64,17 @@ public sealed partial class EtabsParametricModellingService
                     frameMap[member.Id] = frameName;
                     AssignCotArchFrameToGroup(sapModel, frameName, mainGroup, member.Id);
                     AssignCotArchFrameToGroup(sapModel, frameName, memberGroups[member.Kind], member.Id);
-                    ApplyCotArchReleasePreset(sapModel, frameName, member);
+                    TryApplyCotArchReleasePreset(sapModel, frameName, member, warnings);
+                    if (member.Kind == CotArchMemberKind.TensionTie)
+                        TryAssignCotArchTensionOnlyLimit(sapModel, frameName, member.Id, warnings);
                 }
 
                 ApplyCotArchRestraints(sapModel, model, pointMap);
-                TryRefreshEtabsView(sapModel);
+                List<string> upperBeamFrames = GetCotArchUpperBeamFrameNames(model, frameMap, warnings);
+                List<string> upperJointPoints = GetCotArchUpperJointPointNames(model, pointMap, warnings);
+                TryApplyCotArchLoadsToEtabs(sapModel, model.Input, upperBeamFrames, upperJointPoints, warnings);
+                appliedUpperBeamLoads = ReadCotArchUpperBeamLoads(sapModel, upperBeamFrames, upperJointPoints, warnings);
+                refreshViewAfterDraw = createdFrames.Count > 0 || pointMap.Count > 0;
 
                 try
                 {
@@ -91,11 +100,12 @@ public sealed partial class EtabsParametricModellingService
 
                 return new CotArchDrawResult
                 {
-                    Message = $"Drawn {createdFrames.Count} CoT Arch frame object(s) in group '{mainGroup}'.",
+                    Message = BuildCotArchDrawMessage(model, createdFrames.Count, mainGroup),
                     FrameCount = createdFrames.Count,
                     GroupName = mainGroup,
                     FrameObjectNames = createdFrames,
                     PointObjectNames = pointMap.Values.Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                    AppliedUpperBeamLoads = appliedUpperBeamLoads,
                     Warnings = warnings
                 };
             }
@@ -103,6 +113,8 @@ public sealed partial class EtabsParametricModellingService
             {
                 if (originalUnits != null)
                     TryRestorePresentUnits(sapModel, originalUnits.Value);
+                if (refreshViewAfterDraw)
+                    TryRefreshCotArchViewAfterDraw(sapModel);
             }
         }
         catch (Exception ex)
@@ -114,6 +126,71 @@ public sealed partial class EtabsParametricModellingService
                 FrameCount = createdFrames.Count,
                 FrameObjectNames = createdFrames,
                 PointObjectNames = createdPoints.Concat(reusedPoints).Distinct(StringComparer.OrdinalIgnoreCase).ToList(),
+                AppliedUpperBeamLoads = appliedUpperBeamLoads,
+                Warnings = warnings
+            };
+        }
+    }
+
+    public CotArchDrawResult UpdateCotArchLoads(CotArchLoadUpdateRequest request)
+    {
+        var warnings = new List<string>();
+        var appliedUpperBeamLoads = new List<CotArchAppliedUpperBeamLoad>();
+        try
+        {
+            CotArchModel model = request.Model;
+            if (model.Nodes.Count == 0 || model.Members.Count == 0)
+                throw new InvalidOperationException("No CoT Arch geometry was provided.");
+
+            ETABSv1.cSapModel sapModel = GetRequiredSapModelObject(GetEtabsObject(request.EtabsInstanceId));
+            ETABSv1.eUnits? originalUnits = TryGetPresentUnits(sapModel);
+            bool refreshViewAfterUpdate = false;
+
+            try
+            {
+                TrySetPresentUnitsToKnM(sapModel, warnings);
+                TryUnlockModelForDrawing(sapModel, warnings);
+                ValidateCotArchLoadPattern(sapModel, model, warnings);
+
+                int existing = GetCotArchGroupAssignmentCount(sapModel, model.GroupName);
+                if (existing == 0)
+                    throw new InvalidOperationException($"No generated CoT Arch objects were found in group '{model.GroupName}'. Generate the structure before updating loads.");
+
+                List<string> upperBeamFrames = GetCotArchUpperBeamFrameNamesFromEtabs(sapModel, model, warnings);
+                List<string> upperJointPoints = GetCotArchUpperJointPointNamesFromEtabs(sapModel, model, warnings);
+                if (upperBeamFrames.Count == 0 && upperJointPoints.Count == 0)
+                    throw new InvalidOperationException($"No CoT Arch upper-beam load targets were found in group '{model.GroupName}'. Regenerate the structure, then update loads again.");
+
+                TryApplyCotArchLoadsToEtabs(sapModel, model.Input, upperBeamFrames, upperJointPoints, warnings);
+                appliedUpperBeamLoads = ReadCotArchUpperBeamLoads(sapModel, upperBeamFrames, upperJointPoints, warnings);
+                refreshViewAfterUpdate = true;
+
+                return new CotArchDrawResult
+                {
+                    Message = BuildCotArchLoadUpdateMessage(model),
+                    FrameCount = upperBeamFrames.Count,
+                    GroupName = model.GroupName,
+                    FrameObjectNames = upperBeamFrames,
+                    PointObjectNames = upperJointPoints,
+                    AppliedUpperBeamLoads = appliedUpperBeamLoads,
+                    Warnings = warnings
+                };
+            }
+            finally
+            {
+                if (originalUnits != null)
+                    TryRestorePresentUnits(sapModel, originalUnits.Value);
+                if (refreshViewAfterUpdate)
+                    TryRefreshCotArchViewAfterDraw(sapModel);
+            }
+        }
+        catch (Exception ex)
+        {
+            return new CotArchDrawResult
+            {
+                IsError = true,
+                Message = ex.Message,
+                AppliedUpperBeamLoads = appliedUpperBeamLoads,
                 Warnings = warnings
             };
         }
@@ -171,6 +248,21 @@ public sealed partial class EtabsParametricModellingService
             throw new InvalidOperationException("CoT Arch generation stopped because these selected frame sections do not exist in ETABS: " + string.Join(", ", missing.Select(section => section.Length == 0 ? "<blank>" : section)));
     }
 
+    private static void ValidateCotArchLoadPattern(ETABSv1.cSapModel sapModel, CotArchModel model, List<string> warnings)
+    {
+        CotArchInput input = model.Input;
+        if (input.UpperBeamLoadType == CotArchUpperBeamLoadType.None)
+            return;
+
+        string loadPattern = (input.UpperBeamLoadPattern ?? "").Trim();
+        if (loadPattern.Length == 0)
+            throw new InvalidOperationException("Select an ETABS load pattern before applying a CoT Arch upper-beam load.");
+
+        HashSet<string> availableLoadPatterns = GetLoadPatternNames(sapModel, warnings).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (availableLoadPatterns.Count > 0 && !availableLoadPatterns.Contains(loadPattern))
+            throw new InvalidOperationException($"CoT Arch generation stopped because load pattern '{loadPattern}' does not exist in ETABS.");
+    }
+
     private static Dictionary<CotArchMemberKind, string> EnsureCotArchGroups(ETABSv1.cSapModel sapModel, CotArchModel model, List<string> warnings)
     {
         EnsureEtabsDrawGroup(sapModel, model.PointGroupName, warnings);
@@ -199,6 +291,29 @@ public sealed partial class EtabsParametricModellingService
         yield return model.UpperBeamGroupName;
         yield return model.TieGroupName;
         yield return model.SupportColumnGroupName;
+    }
+
+    private static string BuildCotArchDrawMessage(CotArchModel model, int frameCount, string groupName)
+    {
+        string message = $"Drawn {frameCount} CoT Arch frame object(s) in group '{groupName}'.";
+        CotArchInput input = model.Input;
+        return input.UpperBeamLoadType switch
+        {
+            CotArchUpperBeamLoadType.Udl => message + $" Applied {input.UpperBeamUdlKnPerM:0.###} kN/m downward UDL to the upper beam.",
+            CotArchUpperBeamLoadType.PointLoadAtJoints => message + $" Applied {input.UpperBeamPointLoadKn:0.###} kN downward point load at each upper-beam joint.",
+            _ => message
+        };
+    }
+
+    private static string BuildCotArchLoadUpdateMessage(CotArchModel model)
+    {
+        CotArchInput input = model.Input;
+        return input.UpperBeamLoadType switch
+        {
+            CotArchUpperBeamLoadType.Udl => $"Updated CoT Arch upper-beam loading in group '{model.GroupName}' to {input.UpperBeamUdlKnPerM:0.###} kN/m downward UDL.",
+            CotArchUpperBeamLoadType.PointLoadAtJoints => $"Updated CoT Arch upper-beam loading in group '{model.GroupName}' to {input.UpperBeamPointLoadKn:0.###} kN downward point load at each upper-beam joint.",
+            _ => $"No CoT Arch upper-beam load type was selected; existing loading in group '{model.GroupName}' was not changed."
+        };
     }
 
     private sealed class CotArchGroupNameSet
@@ -513,51 +628,515 @@ public sealed partial class EtabsParametricModellingService
         CheckCotArchEtabs(ret, $"Assign CoT Arch frame {memberId} to group {groupName}");
     }
 
-    private static void ApplyCotArchReleasePreset(ETABSv1.cSapModel sapModel, string frameName, CotArchMember member)
+    private static void TryApplyCotArchReleasePreset(ETABSv1.cSapModel sapModel, string frameName, CotArchMember member, List<string> warnings)
     {
         if (member.ReleasePreset == CotArchMemberReleasePreset.FullyContinuous)
             return;
 
-        bool[] startReleases = [false, false, false, true, true, true];
-        bool[] endReleases = [false, false, false, true, true, true];
-        double[] startSpring = [0, 0, 0, 0, 0, 0];
-        double[] endSpring = [0, 0, 0, 0, 0, 0];
-        int ret = sapModel.FrameObj.SetReleases(frameName, ref startReleases, ref endReleases, ref startSpring, ref endSpring, EtabsObjects);
-        CheckCotArchEtabs(ret, $"Assign {member.ReleasePreset} releases to CoT Arch frame {member.Id}");
+        try
+        {
+            bool[] startReleases = [false, false, false, false, true, true];
+            bool[] endReleases = [false, false, false, false, true, true];
+            double[] startSpring = [0, 0, 0, 0, 0, 0];
+            double[] endSpring = [0, 0, 0, 0, 0, 0];
+            int ret = sapModel.FrameObj.SetReleases(frameName, ref startReleases, ref endReleases, ref startSpring, ref endSpring, EtabsObjects);
+            if (ret != 0)
+                warnings.Add($"CoT Arch member '{member.Id}' was drawn, but ETABS could not assign M22/M33 end releases. Return code: {ret}.");
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"CoT Arch member '{member.Id}' was drawn, but release assignment failed: {ex.Message}");
+        }
+    }
+
+    private static void TryAssignCotArchTensionOnlyLimit(ETABSv1.cSapModel sapModel, string frameName, string memberId, List<string> warnings)
+    {
+        try
+        {
+            int ret = sapModel.FrameObj.SetTCLimits(frameName, true, 0, false, 0, EtabsObjects);
+            if (ret != 0)
+                warnings.Add($"CoT Arch tension tie '{memberId}' was drawn, but ETABS could not assign zero compression capacity. Return code: {ret}.");
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"CoT Arch tension tie '{memberId}' was drawn, but tension-only limit assignment failed: {ex.Message}");
+        }
+    }
+
+    private static void TryApplyCotArchLoads(
+        ETABSv1.cSapModel sapModel,
+        CotArchModel model,
+        Dictionary<string, string> pointMap,
+        Dictionary<string, string> frameMap,
+        List<string> warnings)
+    {
+        List<string> upperBeamFrames = GetCotArchUpperBeamFrameNames(model, frameMap, warnings);
+        List<string> upperJointPoints = GetCotArchUpperJointPointNames(model, pointMap, warnings);
+        TryApplyCotArchLoadsToEtabs(sapModel, model.Input, upperBeamFrames, upperJointPoints, warnings);
+    }
+
+    private static void TryApplyCotArchLoadsToEtabs(
+        ETABSv1.cSapModel sapModel,
+        CotArchInput input,
+        IReadOnlyList<string> upperBeamFrameNames,
+        IReadOnlyList<string> upperJointPointNames,
+        List<string> warnings)
+    {
+        if (input.UpperBeamLoadType == CotArchUpperBeamLoadType.None)
+            return;
+
+        string loadPattern = (input.UpperBeamLoadPattern ?? "").Trim();
+        if (loadPattern.Length == 0)
+        {
+            warnings.Add("Skipped CoT Arch upper-beam load: no load pattern was selected.");
+            return;
+        }
+
+        TryClearCotArchUpperBeamLoads(sapModel, upperBeamFrameNames, upperJointPointNames, loadPattern, warnings);
+
+        if (input.UpperBeamLoadType == CotArchUpperBeamLoadType.Udl)
+        {
+            TryApplyCotArchUpperBeamUdl(sapModel, upperBeamFrameNames, loadPattern, -Math.Abs(input.UpperBeamUdlKnPerM), warnings);
+            return;
+        }
+
+        if (input.UpperBeamLoadType == CotArchUpperBeamLoadType.PointLoadAtJoints)
+            TryApplyCotArchUpperJointPointLoads(sapModel, upperJointPointNames, loadPattern, -Math.Abs(input.UpperBeamPointLoadKn), warnings);
+    }
+
+    private static List<string> GetCotArchUpperBeamFrameNames(CotArchModel model, Dictionary<string, string> frameMap, List<string> warnings)
+    {
+        var frameNames = new List<string>();
+        foreach (CotArchMember member in model.Members.Where(member => member.Kind == CotArchMemberKind.UpperBeam))
+        {
+            if (!frameMap.TryGetValue(member.Id, out string? frameName) || string.IsNullOrWhiteSpace(frameName))
+            {
+                warnings.Add($"Skipped CoT Arch upper-beam load target '{member.Id}': ETABS frame name was not found.");
+                continue;
+            }
+
+            frameNames.Add(frameName);
+        }
+
+        return frameNames.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static List<string> GetCotArchUpperJointPointNames(CotArchModel model, Dictionary<string, string> pointMap, List<string> warnings)
+    {
+        var pointNames = new List<string>();
+        foreach (CotArchNode node in model.PostTopNodes.DistinctBy(node => node.Id))
+        {
+            if (!pointMap.TryGetValue(node.Id, out string? pointName) || string.IsNullOrWhiteSpace(pointName))
+            {
+                warnings.Add($"Skipped CoT Arch upper joint load target '{node.Id}': ETABS point name was not found.");
+                continue;
+            }
+
+            pointNames.Add(pointName);
+        }
+
+        return pointNames.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static List<string> GetCotArchUpperBeamFrameNamesFromEtabs(ETABSv1.cSapModel sapModel, CotArchModel model, List<string> warnings)
+    {
+        List<string> frameNames = GetCotArchAssignments(sapModel, model.UpperBeamGroupName, warnings)
+            .Where(assignment => assignment.Type == EtabsSelectedFrameObjectType)
+            .Select(assignment => assignment.Name)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (frameNames.Count == 0)
+            warnings.Add($"No ETABS frame objects were found in CoT Arch upper-beam group '{model.UpperBeamGroupName}'.");
+
+        return frameNames;
+    }
+
+    private static List<string> GetCotArchUpperJointPointNamesFromEtabs(ETABSv1.cSapModel sapModel, CotArchModel model, List<string> warnings)
+    {
+        List<string> pointNames = GetCotArchAssignments(sapModel, model.PointGroupName, warnings)
+            .Where(assignment => assignment.Type == EtabsSelectedPointObjectType)
+            .Select(assignment => assignment.Name)
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (pointNames.Count == 0)
+        {
+            warnings.Add($"No ETABS point objects were found in CoT Arch point group '{model.PointGroupName}'.");
+            return [];
+        }
+
+        List<CotArchNode> targetNodes = model.PostTopNodes.DistinctBy(node => node.Id).ToList();
+        var upperJointPointNames = new List<string>();
+        foreach (string pointName in pointNames)
+        {
+            try
+            {
+                (double X, double Y, double Z) coordinates = GetPointCoordinates(sapModel, pointName);
+                if (targetNodes.Any(node => IsCotArchPointAtNode(coordinates, node)))
+                    upperJointPointNames.Add(pointName);
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"Could not inspect CoT Arch point '{pointName}' while resolving upper-beam load targets: {ex.Message}");
+            }
+        }
+
+        if (upperJointPointNames.Count == 0)
+            warnings.Add("No CoT Arch upper-beam joint points were resolved from the generated point group.");
+
+        return upperJointPointNames.Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+    }
+
+    private static bool IsCotArchPointAtNode((double X, double Y, double Z) coordinates, CotArchNode node)
+    {
+        return Math.Abs(coordinates.X - node.X) <= CotArchCoordinateTolerance &&
+            Math.Abs(coordinates.Y - node.Y) <= CotArchCoordinateTolerance &&
+            Math.Abs(coordinates.Z - node.Z) <= CotArchCoordinateTolerance;
+    }
+
+    private static void TryClearCotArchUpperBeamLoads(
+        ETABSv1.cSapModel sapModel,
+        IReadOnlyList<string> upperBeamFrameNames,
+        IReadOnlyList<string> upperJointPointNames,
+        string loadPattern,
+        List<string> warnings)
+    {
+        foreach (string frameName in upperBeamFrameNames)
+        {
+            TryClearFrameDistributedLoads(sapModel, frameName, warnings, loadPattern);
+            TryClearFramePointLoads(sapModel, frameName, warnings, loadPattern);
+        }
+
+        foreach (string pointName in upperJointPointNames)
+            TryClearPointForceLoads(sapModel, pointName, warnings, loadPattern);
+    }
+
+    private static List<CotArchAppliedUpperBeamLoad> ReadCotArchUpperBeamLoads(
+        ETABSv1.cSapModel sapModel,
+        IReadOnlyList<string> upperBeamFrameNames,
+        IReadOnlyList<string> upperJointPointNames,
+        List<string> warnings)
+    {
+        var seeds = new List<CotArchAppliedUpperBeamLoadSeed>();
+
+        foreach (string frameName in upperBeamFrameNames
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            TryAppendCotArchUpperBeamDistributedLoads(sapModel, frameName, seeds, warnings);
+        }
+
+        foreach (string pointName in upperJointPointNames
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.OrdinalIgnoreCase))
+        {
+            TryAppendCotArchUpperJointPointLoads(sapModel, pointName, seeds, warnings);
+        }
+
+        return seeds
+            .Where(seed => !string.IsNullOrWhiteSpace(seed.LoadPattern))
+            .GroupBy(seed => new
+            {
+                Pattern = seed.LoadPattern.Trim().ToUpperInvariant(),
+                seed.LoadType,
+                seed.ValueText,
+                seed.TargetSingular,
+                seed.TargetPlural
+            })
+            .OrderBy(group => group.First().LoadPattern, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(group => group.First().LoadType, StringComparer.OrdinalIgnoreCase)
+            .Select(group =>
+            {
+                CotArchAppliedUpperBeamLoadSeed first = group.First();
+                int count = group.Count();
+                return new CotArchAppliedUpperBeamLoad
+                {
+                    LoadPattern = first.LoadPattern,
+                    LoadType = first.LoadType,
+                    ValueText = first.ValueText,
+                    TargetText = $"{count} {(count == 1 ? first.TargetSingular : first.TargetPlural)}"
+                };
+            })
+            .ToList();
+    }
+
+    private static void TryAppendCotArchUpperBeamDistributedLoads(
+        ETABSv1.cSapModel sapModel,
+        string frameName,
+        List<CotArchAppliedUpperBeamLoadSeed> loads,
+        List<string> warnings)
+    {
+        try
+        {
+            int numberItems = 0;
+            string[] frameNames = [];
+            string[] loadPatterns = [];
+            int[] loadTypes = [];
+            string[] coordinateSystems = [];
+            int[] directions = [];
+            double[] relativeDistance1 = [];
+            double[] relativeDistance2 = [];
+            double[] distance1 = [];
+            double[] distance2 = [];
+            double[] value1 = [];
+            double[] value2 = [];
+
+            int ret = sapModel.FrameObj.GetLoadDistributed(
+                frameName,
+                ref numberItems,
+                ref frameNames,
+                ref loadPatterns,
+                ref loadTypes,
+                ref coordinateSystems,
+                ref directions,
+                ref relativeDistance1,
+                ref relativeDistance2,
+                ref distance1,
+                ref distance2,
+                ref value1,
+                ref value2,
+                EtabsObjects);
+
+            if (ret != 0 || loadPatterns.Length == 0)
+                return;
+
+            int count = Math.Min(numberItems, loadPatterns.Length);
+            for (int index = 0; index < count; index++)
+            {
+                if (index < loadTypes.Length && loadTypes[index] != 1)
+                    continue;
+
+                double startValue = index < value1.Length ? value1[index] : 0;
+                double endValue = index < value2.Length ? value2[index] : startValue;
+                if (Math.Abs(startValue) <= CotArchCoordinateTolerance && Math.Abs(endValue) <= CotArchCoordinateTolerance)
+                    continue;
+
+                int direction = index < directions.Length ? directions[index] : 0;
+                loads.Add(new CotArchAppliedUpperBeamLoadSeed(
+                    loadPatterns[index],
+                    "UDL",
+                    FormatCotArchDistributedLoadValue(startValue, endValue, direction),
+                    "beam segment",
+                    "beam segments"));
+            }
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"CoT Arch upper-beam distributed loads could not be read on frame '{frameName}': {ex.Message}");
+        }
+    }
+
+    private static void TryAppendCotArchUpperJointPointLoads(
+        ETABSv1.cSapModel sapModel,
+        string pointName,
+        List<CotArchAppliedUpperBeamLoadSeed> loads,
+        List<string> warnings)
+    {
+        try
+        {
+            int numberItems = 0;
+            string[] pointNames = [];
+            string[] loadPatterns = [];
+            int[] stepTypes = [];
+            string[] coordinateSystems = [];
+            double[] f1 = [];
+            double[] f2 = [];
+            double[] f3 = [];
+            double[] m1 = [];
+            double[] m2 = [];
+            double[] m3 = [];
+
+            int ret = sapModel.PointObj.GetLoadForce(
+                pointName,
+                ref numberItems,
+                ref pointNames,
+                ref loadPatterns,
+                ref stepTypes,
+                ref coordinateSystems,
+                ref f1,
+                ref f2,
+                ref f3,
+                ref m1,
+                ref m2,
+                ref m3,
+                EtabsObjects);
+
+            if (ret != 0 || loadPatterns.Length == 0)
+                return;
+
+            int count = Math.Min(numberItems, loadPatterns.Length);
+            for (int index = 0; index < count; index++)
+            {
+                double verticalLoad = index < f3.Length ? f3[index] : 0;
+                if (Math.Abs(verticalLoad) <= CotArchCoordinateTolerance)
+                    continue;
+
+                loads.Add(new CotArchAppliedUpperBeamLoadSeed(
+                    loadPatterns[index],
+                    "Point",
+                    FormatCotArchSignedVerticalLoadValue(verticalLoad, "kN"),
+                    "joint",
+                    "joints"));
+            }
+        }
+        catch (Exception ex)
+        {
+            warnings.Add($"CoT Arch upper-joint point loads could not be read at point '{pointName}': {ex.Message}");
+        }
+    }
+
+    private static string FormatCotArchDistributedLoadValue(double startValue, double endValue, int direction)
+    {
+        if (IsCotArchVerticalDistributedDirection(direction))
+        {
+            if (Math.Abs(startValue - endValue) <= CotArchCoordinateTolerance)
+                return FormatCotArchSignedVerticalLoadValue(startValue, "kN/m", IsCotArchGravityPositiveDirection(direction));
+
+            return $"{FormatCotArchSignedVerticalLoadValue(startValue, "kN/m", IsCotArchGravityPositiveDirection(direction))} to {FormatCotArchSignedVerticalLoadValue(endValue, "kN/m", IsCotArchGravityPositiveDirection(direction))}";
+        }
+
+        string directionText = direction switch
+        {
+            4 => "Global X",
+            5 => "Global Y",
+            7 => "Projected Global X",
+            8 => "Projected Global Y",
+            _ => $"Direction {direction}"
+        };
+
+        if (Math.Abs(startValue - endValue) <= CotArchCoordinateTolerance)
+            return $"{startValue:0.###} kN/m ({directionText})";
+
+        return $"{startValue:0.###} to {endValue:0.###} kN/m ({directionText})";
+    }
+
+    private static bool IsCotArchVerticalDistributedDirection(int direction) => direction is 6 or 9 or 10 or 11;
+
+    private static bool IsCotArchGravityPositiveDirection(int direction) => direction is 10 or 11;
+
+    private static string FormatCotArchSignedVerticalLoadValue(double value, string unit, bool positiveIsDown = false)
+    {
+        string sense = positiveIsDown
+            ? value > CotArchCoordinateTolerance ? "down" : "up"
+            : value < -CotArchCoordinateTolerance ? "down" : "up";
+        return $"{Math.Abs(value):0.###} {unit} {sense}";
+    }
+
+    private sealed record CotArchAppliedUpperBeamLoadSeed(
+        string LoadPattern,
+        string LoadType,
+        string ValueText,
+        string TargetSingular,
+        string TargetPlural);
+
+    private static void TryApplyCotArchUpperBeamUdl(
+        ETABSv1.cSapModel sapModel,
+        IReadOnlyList<string> upperBeamFrameNames,
+        string loadPattern,
+        double loadKnPerM,
+        List<string> warnings)
+    {
+        if (upperBeamFrameNames.Count == 0)
+        {
+            warnings.Add("Skipped CoT Arch upper-beam UDL: no upper-beam frame targets were found.");
+            return;
+        }
+
+        int direction = ToEtabsDistributedLoadDirection("GlobalZ");
+        foreach (string frameName in upperBeamFrameNames)
+        {
+            try
+            {
+                int ret = sapModel.FrameObj.SetLoadDistributed(
+                    frameName,
+                    loadPattern,
+                    1,
+                    direction,
+                    0,
+                    1,
+                    loadKnPerM,
+                    loadKnPerM,
+                    "Global",
+                    true,
+                    true,
+                    EtabsObjects);
+
+                if (ret != 0)
+                    warnings.Add($"ETABS could not assign CoT Arch upper-beam UDL to frame '{frameName}'. Return code: {ret}.");
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"CoT Arch upper-beam UDL assignment failed on frame '{frameName}': {ex.Message}");
+            }
+        }
+    }
+
+    private static void TryApplyCotArchUpperJointPointLoads(
+        ETABSv1.cSapModel sapModel,
+        IReadOnlyList<string> upperJointPointNames,
+        string loadPattern,
+        double loadKn,
+        List<string> warnings)
+    {
+        if (upperJointPointNames.Count == 0)
+        {
+            warnings.Add("Skipped CoT Arch upper joint point load: no upper-joint point targets were found.");
+            return;
+        }
+
+        foreach (string pointName in upperJointPointNames)
+        {
+            double[] values = [0, 0, loadKn, 0, 0, 0];
+            try
+            {
+                int ret = sapModel.PointObj.SetLoadForce(pointName, loadPattern, ref values, true, "Global", EtabsObjects);
+                if (ret != 0)
+                    warnings.Add($"ETABS could not assign CoT Arch upper joint point load to point '{pointName}'. Return code: {ret}.");
+            }
+            catch (Exception ex)
+            {
+                warnings.Add($"CoT Arch upper joint point load assignment failed at point '{pointName}': {ex.Message}");
+            }
+        }
     }
 
     private static void ApplyCotArchRestraints(ETABSv1.cSapModel sapModel, CotArchModel model, Dictionary<string, string> pointMap)
     {
-        if (model.Input.GenerateAsPlanarModel)
-        {
-            foreach (string pointName in pointMap.Values.Distinct(StringComparer.OrdinalIgnoreCase))
-                SetCotArchPointRestraint(sapModel, pointName, [false, true, false, true, false, true], $"planar CoT Arch joint '{pointName}'");
-        }
+        foreach (string pointName in pointMap.Values.Distinct(StringComparer.OrdinalIgnoreCase))
+            SetCotArchPointRestraint(sapModel, pointName, BuildFreePointRestraints(), $"free CoT Arch joint '{pointName}'");
 
         if (model.LeftBase == null || model.RightBase == null)
             return;
 
-        bool[] baseRestraints = BuildCotArchBaseRestraints(model.Input.SupportCondition, model.Input.GenerateAsPlanarModel);
+        bool[] baseRestraints = BuildCotArchPinnedBaseRestraints();
         if (pointMap.TryGetValue(model.LeftBase.Id, out string? leftBasePoint))
             SetCotArchPointRestraint(sapModel, leftBasePoint, baseRestraints, "left CoT Arch base support");
         if (pointMap.TryGetValue(model.RightBase.Id, out string? rightBasePoint))
             SetCotArchPointRestraint(sapModel, rightBasePoint, baseRestraints, "right CoT Arch base support");
     }
 
-    private static bool[] BuildCotArchBaseRestraints(CotArchSupportCondition supportCondition, bool planar)
-    {
-        if (supportCondition == CotArchSupportCondition.Fixed)
-            return [true, true, true, true, true, true];
-
-        return planar
-            ? [true, true, true, true, false, true]
-            : [true, true, true, false, false, false];
-    }
+    private static bool[] BuildCotArchPinnedBaseRestraints() => [true, true, true, false, false, false];
 
     private static void SetCotArchPointRestraint(ETABSv1.cSapModel sapModel, string pointName, bool[] restraints, string description)
     {
         int ret = sapModel.PointObj.SetRestraint(pointName, ref restraints, EtabsObjects);
         CheckCotArchEtabs(ret, $"Set restraint for {description}");
+    }
+
+    private static void TryRefreshCotArchViewAfterDraw(ETABSv1.cSapModel sapModel)
+    {
+        TryRefreshEtabsView(sapModel);
+        try
+        {
+            sapModel.View.RefreshView(0, true);
+        }
+        catch
+        {
+            // The normal refresh above matches the other tabs; this extra pass only improves live display.
+        }
     }
 
     private static void ValidateWrittenCotArch(

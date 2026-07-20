@@ -15,8 +15,11 @@ internal static class Program
             ("Arch endpoints and crown are exact", ArchEndpointsAndCrownAreExact),
             ("Upper beam terminates at end posts", UpperBeamTerminatesAtEndPosts),
             ("Vertical posts stand on arch nodes", VerticalPostsStandOnArchNodes),
+            ("Zero-height crown post becomes shared joint", ZeroHeightCrownPostBecomesSharedJoint),
             ("Springing joints are shared", SpringingJointsAreShared),
-            ("Extra arch segments subdivide post bays", ExtraArchSegmentsSubdividePostBays)
+            ("Extra arch segments subdivide post bays", ExtraArchSegmentsSubdividePostBays),
+            ("Upper beam UDL validation requires pattern and magnitude", UpperBeamUdlValidationRequiresPatternAndMagnitude),
+            ("Upper beam point load validation requires pattern and magnitude", UpperBeamPointLoadValidationRequiresPatternAndMagnitude)
         ];
 
         int failed = 0;
@@ -110,6 +113,20 @@ internal static class Program
         Equal(right, model.Members.Single(member => member.Id.EndsWith("_F_SUPPORT_R", StringComparison.OrdinalIgnoreCase)).EndNodeId, "Right support column should end at right springing.");
     }
 
+    private static void ZeroHeightCrownPostBecomesSharedJoint()
+    {
+        CotArchInput input = SampleInput();
+        input.UpperBeamZ = input.SpringingZ + input.Rise;
+        CotArchModel model = new CotArchGeometryBuilder().Build(input);
+        var validator = new CotArchValidator();
+        ParametricValidationResult validation = validator.Validate(model);
+
+        Equal(8, model.VerticalPostCount, "The zero-height crown post should not be generated as a frame object.");
+        Equal(model.PostBottomNodes[4].Id, model.PostTopNodes[4].Id, "The crown post top should reuse the arch node.");
+        False(model.Members.Any(member => IsZeroLength(member, model)), "Generated CoT Arch members should not contain zero-length frames.");
+        False(validation.HasCriticalIssues, "A zero-height post station at the arch crown should not block generation.");
+    }
+
     private static void ExtraArchSegmentsSubdividePostBays()
     {
         CotArchInput input = SampleInput();
@@ -118,6 +135,44 @@ internal static class Program
         Equal(16, model.ArchSegmentCount, "Two arch segments per bay should create 16 arch members for 9 posts.");
         Equal(17, model.ArchNodes.Count, "Two arch segments per bay should create 17 arch nodes for 9 posts.");
         Equal(9, model.VerticalPostCount, "Extra arch nodes must not create extra vertical posts.");
+    }
+
+    private static void UpperBeamUdlValidationRequiresPatternAndMagnitude()
+    {
+        CotArchInput input = SampleInput();
+        input.UpperBeamLoadType = CotArchUpperBeamLoadType.Udl;
+        input.UpperBeamLoadPattern = "";
+        input.UpperBeamUdlKnPerM = 10;
+        True(new CotArchValidator().Validate(new CotArchGeometryBuilder().Build(input)).HasCriticalIssues,
+            "UDL loading should require a load pattern.");
+
+        input.UpperBeamLoadPattern = "DEAD";
+        input.UpperBeamUdlKnPerM = 0;
+        True(new CotArchValidator().Validate(new CotArchGeometryBuilder().Build(input)).HasCriticalIssues,
+            "UDL loading should require a positive magnitude.");
+
+        input.UpperBeamUdlKnPerM = 10;
+        False(new CotArchValidator().Validate(new CotArchGeometryBuilder().Build(input)).HasCriticalIssues,
+            "UDL loading with pattern and positive magnitude should pass geometry validation.");
+    }
+
+    private static void UpperBeamPointLoadValidationRequiresPatternAndMagnitude()
+    {
+        CotArchInput input = SampleInput();
+        input.UpperBeamLoadType = CotArchUpperBeamLoadType.PointLoadAtJoints;
+        input.UpperBeamLoadPattern = "";
+        input.UpperBeamPointLoadKn = 50;
+        True(new CotArchValidator().Validate(new CotArchGeometryBuilder().Build(input)).HasCriticalIssues,
+            "Point loading should require a load pattern.");
+
+        input.UpperBeamLoadPattern = "LIVE";
+        input.UpperBeamPointLoadKn = 0;
+        True(new CotArchValidator().Validate(new CotArchGeometryBuilder().Build(input)).HasCriticalIssues,
+            "Point loading should require a positive magnitude.");
+
+        input.UpperBeamPointLoadKn = 50;
+        False(new CotArchValidator().Validate(new CotArchGeometryBuilder().Build(input)).HasCriticalIssues,
+            "Point loading with pattern and positive magnitude should pass geometry validation.");
     }
 
     private static CotArchModel BuildSample()
@@ -154,6 +209,12 @@ internal static class Program
             throw new InvalidOperationException(message);
     }
 
+    private static void False(bool condition, string message)
+    {
+        if (condition)
+            throw new InvalidOperationException(message);
+    }
+
     private static void Equal<T>(T expected, T actual, string message)
     {
         if (!EqualityComparer<T>.Default.Equals(expected, actual))
@@ -164,5 +225,16 @@ internal static class Program
     {
         if (Math.Abs(expected - actual) > Tolerance)
             throw new InvalidOperationException($"{message} Expected {expected:0.######}, actual {actual:0.######}.");
+    }
+
+    private static bool IsZeroLength(CotArchMember member, CotArchModel model)
+    {
+        Dictionary<string, CotArchNode> nodes = model.Nodes.ToDictionary(node => node.Id, StringComparer.OrdinalIgnoreCase);
+        CotArchNode start = nodes[member.StartNodeId];
+        CotArchNode end = nodes[member.EndNodeId];
+        double dx = end.X - start.X;
+        double dy = end.Y - start.Y;
+        double dz = end.Z - start.Z;
+        return Math.Sqrt(dx * dx + dy * dy + dz * dz) <= Tolerance;
     }
 }

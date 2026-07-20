@@ -4,8 +4,20 @@ public enum CityMemberKind
 {
     Frame,
     Cable,
-    Tie,
-    Support
+    Tie
+}
+
+public enum CityTopChordLoadType
+{
+    None,
+    Udl,
+    PointLoadAtJoints
+}
+
+public enum CityMemberReleasePreset
+{
+    FullyContinuous,
+    PinnedBothEnds
 }
 
 public static class CityMemberGroups
@@ -19,7 +31,6 @@ public static class CityMemberGroups
     public const string InternalCable = "Internal cable fans";
     public const string Backstay = "External backstays";
     public const string GlobalTie = "Global lower tie";
-    public const string Foundation = "Pile / foundation";
 }
 
 public sealed class CityOfTomorrowInput
@@ -40,8 +51,26 @@ public sealed class CityOfTomorrowInput
     public string VerticalPostSection { get; set; } = "";
     public string TowerSection { get; set; } = "";
     public string SideFrameSection { get; set; } = "";
+    public string SideVerticalSection { get; set; } = "";
+    public string SideX1Section { get; set; } = "";
+    public string SideX2Section { get; set; } = "";
     public string CableSection { get; set; } = "";
     public string TieCableSection { get; set; } = "";
+    public CityMemberReleasePreset TopChordReleasePreset { get; set; } = CityMemberReleasePreset.FullyContinuous;
+    public CityMemberReleasePreset MidRailReleasePreset { get; set; } = CityMemberReleasePreset.FullyContinuous;
+    public CityMemberReleasePreset BottomChordReleasePreset { get; set; } = CityMemberReleasePreset.FullyContinuous;
+    public CityMemberReleasePreset VerticalPostReleasePreset { get; set; } = CityMemberReleasePreset.FullyContinuous;
+    public CityMemberReleasePreset TowerReleasePreset { get; set; } = CityMemberReleasePreset.FullyContinuous;
+    public CityMemberReleasePreset SideFrameReleasePreset { get; set; } = CityMemberReleasePreset.FullyContinuous;
+    public CityMemberReleasePreset SideVerticalReleasePreset { get; set; } = CityMemberReleasePreset.FullyContinuous;
+    public CityMemberReleasePreset SideX1ReleasePreset { get; set; } = CityMemberReleasePreset.PinnedBothEnds;
+    public CityMemberReleasePreset SideX2ReleasePreset { get; set; } = CityMemberReleasePreset.PinnedBothEnds;
+    public CityMemberReleasePreset CableReleasePreset { get; set; } = CityMemberReleasePreset.PinnedBothEnds;
+    public CityMemberReleasePreset TieReleasePreset { get; set; } = CityMemberReleasePreset.PinnedBothEnds;
+    public CityTopChordLoadType TopChordLoadType { get; set; } = CityTopChordLoadType.None;
+    public string TopChordLoadPattern { get; set; } = "";
+    public double TopChordUdlKnPerM { get; set; }
+    public double TopChordPointLoadKn { get; set; }
 }
 
 public sealed class CityNode
@@ -63,6 +92,8 @@ public sealed class CityMember
     public CityMemberKind Kind { get; set; }
     public string SectionName { get; set; } = "";
     public bool IsTensionOnly { get; set; }
+    public bool CanUseTensionSection { get; set; }
+    public CityMemberReleasePreset ReleasePreset { get; set; } = CityMemberReleasePreset.FullyContinuous;
 }
 
 public sealed class CityOfTomorrowModel
@@ -87,6 +118,12 @@ public sealed class CityOfTomorrowDrawRequest
     public bool ReplaceExistingStructure { get; set; }
 }
 
+public sealed class CityOfTomorrowLoadUpdateRequest
+{
+    public string? EtabsInstanceId { get; set; }
+    public CityOfTomorrowModel Model { get; set; } = new();
+}
+
 public sealed class CityOfTomorrowDrawResult
 {
     public bool IsError { get; set; }
@@ -95,7 +132,16 @@ public sealed class CityOfTomorrowDrawResult
     public int TensionOnlyCount { get; set; }
     public string GroupName { get; set; } = "";
     public List<string> ObjectNames { get; set; } = [];
+    public List<CityAppliedTopChordLoad> AppliedTopChordLoads { get; set; } = [];
     public List<string> Warnings { get; set; } = [];
+}
+
+public sealed class CityAppliedTopChordLoad
+{
+    public string LoadPattern { get; set; } = "";
+    public string LoadType { get; set; } = "";
+    public string ValueText { get; set; } = "";
+    public string TargetText { get; set; } = "";
 }
 
 public sealed class CityOfTomorrowClearRequest

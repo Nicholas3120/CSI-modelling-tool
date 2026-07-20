@@ -34,26 +34,26 @@ public sealed class CityOfTomorrowGeometryBuilder
 
         for (int index = 0; index < p; index++)
         {
-            AddFrame(model, $"VFR_TOP_{index:000}", TopKey(index), TopKey(index + 1), CityMemberGroups.TopChord, input.TopChordSection);
-            AddFrame(model, $"VFR_MID_{index:000}", MidKey(index), MidKey(index + 1), CityMemberGroups.MidRail, input.MidRailSection);
-            AddFrame(model, $"VFR_BOT_{index:000}", BottomKey(index), BottomKey(index + 1), CityMemberGroups.BottomChord, input.BottomChordSection);
+            AddFrame(model, $"VFR_TOP_{index:000}", TopKey(index), TopKey(index + 1), CityMemberGroups.TopChord, input.TopChordSection, releasePreset: input.TopChordReleasePreset);
+            AddFrame(model, $"VFR_MID_{index:000}", MidKey(index), MidKey(index + 1), CityMemberGroups.MidRail, input.MidRailSection, releasePreset: input.MidRailReleasePreset);
+            AddFrame(model, $"VFR_BOT_{index:000}", BottomKey(index), BottomKey(index + 1), CityMemberGroups.BottomChord, input.BottomChordSection, releasePreset: input.BottomChordReleasePreset);
         }
 
         for (int index = 1; index < p; index++)
         {
-            AddFrame(model, $"VFR_VERT_L_{index:000}", BottomKey(index), MidKey(index), CityMemberGroups.VerticalPost, input.VerticalPostSection);
-            AddFrame(model, $"VFR_VERT_U_{index:000}", MidKey(index), TopKey(index), CityMemberGroups.VerticalPost, input.VerticalPostSection);
+            AddFrame(model, $"VFR_VERT_L_{index:000}", BottomKey(index), MidKey(index), CityMemberGroups.VerticalPost, input.VerticalPostSection, releasePreset: input.VerticalPostReleasePreset);
+            AddFrame(model, $"VFR_VERT_U_{index:000}", MidKey(index), TopKey(index), CityMemberGroups.VerticalPost, input.VerticalPostSection, releasePreset: input.VerticalPostReleasePreset);
         }
 
         for (int index = 1; index <= n; index++)
         {
-            AddCable(model, $"VFR_CABLE_L_{index:000}", TopKey(0), BottomKey(index), CityMemberGroups.InternalCable, input.CableSection);
-            AddCable(model, $"VFR_CABLE_R_{index:000}", TopKey(p), BottomKey(p - index), CityMemberGroups.InternalCable, input.CableSection);
+            AddCable(model, $"VFR_CABLE_L_{index:000}", TopKey(0), BottomKey(index), CityMemberGroups.InternalCable, input.CableSection, releasePreset: input.CableReleasePreset);
+            AddCable(model, $"VFR_CABLE_R_{index:000}", TopKey(p), BottomKey(p - index), CityMemberGroups.InternalCable, input.CableSection, releasePreset: input.CableReleasePreset);
         }
 
         BuildEndSupport(model, points, true, p, zBottom, zMid, zTop);
         BuildEndSupport(model, points, false, p, zBottom, zMid, zTop);
-        AddCable(model, "VFR_GLOBAL_TIE", "VFR.LeftTie", "VFR.RightTie", CityMemberGroups.GlobalTie, input.TieCableSection, CityMemberKind.Tie);
+        AddCable(model, "VFR_GLOBAL_TIE", "VFR.LeftTie", "VFR.RightTie", CityMemberGroups.GlobalTie, input.TieCableSection, CityMemberKind.Tie, input.TieReleasePreset);
         return model;
     }
 
@@ -65,21 +65,16 @@ public sealed class CityOfTomorrowGeometryBuilder
         double towerX = sign * input.ClearSpanL / 2;
         double outerX = towerX + sign * input.ExternalAnchorWidth;
         double upperZ = input.PileCapLevelZ + input.ExternalSideFrameHeight;
-        double pileDepth = Math.Max(1.5, input.ExternalSideFrameHeight * 0.3);
         int endIndex = left ? 0 : p;
         string baseKey = $"VFR.{side}TowerBase";
         string tieKey = $"VFR.{side}Tie";
         string outerLower = $"VFR.{side}OuterLower";
         string outerUpper = $"VFR.{side}OuterUpper";
-        string innerToe = $"VFR.{side}InnerPileToe";
-        string outerToe = $"VFR.{side}OuterPileToe";
 
-        points.AddOrGet(baseKey, towerX, 0, input.PileCapLevelZ);
+        points.AddOrGet(baseKey, towerX, 0, input.PileCapLevelZ, support: true);
         points.AddOrGet(tieKey, towerX, 0, input.TieLevelZ);
-        points.AddOrGet(outerLower, outerX, 0, input.PileCapLevelZ);
+        points.AddOrGet(outerLower, outerX, 0, input.PileCapLevelZ, support: true);
         points.AddOrGet(outerUpper, outerX, 0, upperZ);
-        points.AddOrGet(innerToe, towerX, 0, input.PileCapLevelZ - pileDepth, support: true);
-        points.AddOrGet(outerToe, outerX, 0, input.PileCapLevelZ - pileDepth, support: true);
         string upperTower = ResolveTowerLevel(points, side, towerX, upperZ, endIndex, input, zBottom, zMid, zTop);
 
         var levels = new[] { baseKey, tieKey, BottomKey(endIndex), MidKey(endIndex), upperTower, TopKey(endIndex) }
@@ -90,16 +85,13 @@ public sealed class CityOfTomorrowGeometryBuilder
             .Select(group => group.First())
             .ToList();
         for (int index = 0; index < levels.Count - 1; index++)
-            AddFrame(model, $"VFR_{side.ToUpperInvariant()}_TOWER_{index:000}", levels[index].Key, levels[index + 1].Key, CityMemberGroups.Tower, input.TowerSection);
+            AddFrame(model, $"VFR_{side.ToUpperInvariant()}_TOWER_{index:000}", levels[index].Key, levels[index + 1].Key, CityMemberGroups.Tower, input.TowerSection, releasePreset: input.TowerReleasePreset);
 
-        AddFrame(model, $"VFR_{side.ToUpperInvariant()}_PILE_CAP", baseKey, outerLower, CityMemberGroups.Foundation, input.SideFrameSection, CityMemberKind.Support);
-        AddFrame(model, $"VFR_{side.ToUpperInvariant()}_PILE_INNER", baseKey, innerToe, CityMemberGroups.Foundation, input.TowerSection, CityMemberKind.Support);
-        AddFrame(model, $"VFR_{side.ToUpperInvariant()}_PILE_OUTER", outerLower, outerToe, CityMemberGroups.Foundation, input.TowerSection, CityMemberKind.Support);
-        AddFrame(model, $"VFR_{side.ToUpperInvariant()}_SIDE_VERTICAL", outerLower, outerUpper, CityMemberGroups.SideFrame, input.SideFrameSection);
-        AddFrame(model, $"VFR_{side.ToUpperInvariant()}_SIDE_STRUT", upperTower, outerUpper, CityMemberGroups.SideFrame, input.SideFrameSection);
-        AddFrame(model, $"VFR_{side.ToUpperInvariant()}_SIDE_X1", baseKey, outerUpper, CityMemberGroups.SideFrame, input.SideFrameSection);
-        AddFrame(model, $"VFR_{side.ToUpperInvariant()}_SIDE_X2", upperTower, outerLower, CityMemberGroups.SideFrame, input.SideFrameSection);
-        AddCable(model, $"VFR_{side.ToUpperInvariant()}_BACKSTAY", TopKey(endIndex), outerUpper, CityMemberGroups.Backstay, input.CableSection);
+        AddFrame(model, $"VFR_{side.ToUpperInvariant()}_SIDE_VERTICAL", outerLower, outerUpper, CityMemberGroups.SideFrame, input.SideVerticalSection, canUseTensionSection: true, releasePreset: input.SideVerticalReleasePreset);
+        AddFrame(model, $"VFR_{side.ToUpperInvariant()}_SIDE_STRUT", upperTower, outerUpper, CityMemberGroups.SideFrame, input.SideFrameSection, releasePreset: input.SideFrameReleasePreset);
+        AddFrame(model, $"VFR_{side.ToUpperInvariant()}_SIDE_X1", baseKey, outerUpper, CityMemberGroups.SideFrame, input.SideX1Section, canUseTensionSection: true, releasePreset: input.SideX1ReleasePreset);
+        AddFrame(model, $"VFR_{side.ToUpperInvariant()}_SIDE_X2", upperTower, outerLower, CityMemberGroups.SideFrame, input.SideX2Section, canUseTensionSection: true, releasePreset: input.SideX2ReleasePreset);
+        AddCable(model, $"VFR_{side.ToUpperInvariant()}_BACKSTAY", TopKey(endIndex), outerUpper, CityMemberGroups.Backstay, input.CableSection, releasePreset: input.CableReleasePreset);
     }
 
     private static string ResolveTowerLevel(PointRegistry points, string side, double x, double z, int endIndex, CityOfTomorrowInput input, double bottom, double mid, double top)
@@ -114,11 +106,28 @@ public sealed class CityOfTomorrowGeometryBuilder
         return key;
     }
 
-    private static void AddFrame(CityOfTomorrowModel model, string id, string start, string end, string group, string section, CityMemberKind kind = CityMemberKind.Frame) =>
-        model.Members.Add(new CityMember { Id = id, StartNodeKey = start, EndNodeKey = end, Group = group, SectionName = section ?? "", Kind = kind });
+    private static void AddFrame(
+        CityOfTomorrowModel model,
+        string id,
+        string start,
+        string end,
+        string group,
+        string section,
+        CityMemberKind kind = CityMemberKind.Frame,
+        bool canUseTensionSection = true,
+        CityMemberReleasePreset releasePreset = CityMemberReleasePreset.FullyContinuous) =>
+        model.Members.Add(new CityMember { Id = id, StartNodeKey = start, EndNodeKey = end, Group = group, SectionName = section ?? "", Kind = kind, CanUseTensionSection = canUseTensionSection, ReleasePreset = releasePreset });
 
-    private static void AddCable(CityOfTomorrowModel model, string id, string start, string end, string group, string section, CityMemberKind kind = CityMemberKind.Cable) =>
-        model.Members.Add(new CityMember { Id = id, StartNodeKey = start, EndNodeKey = end, Group = group, SectionName = section ?? "", Kind = kind, IsTensionOnly = true });
+    private static void AddCable(
+        CityOfTomorrowModel model,
+        string id,
+        string start,
+        string end,
+        string group,
+        string section,
+        CityMemberKind kind = CityMemberKind.Cable,
+        CityMemberReleasePreset releasePreset = CityMemberReleasePreset.PinnedBothEnds) =>
+        model.Members.Add(new CityMember { Id = id, StartNodeKey = start, EndNodeKey = end, Group = group, SectionName = section ?? "", Kind = kind, IsTensionOnly = true, ReleasePreset = releasePreset });
 
     private static bool Near(double a, double b) => Math.Abs(a - b) <= Tolerance;
     public static string BottomKey(int index) => $"VFR.B.{index:000}";

@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Windows;
 using System.Windows.Input;
 using CSIModellingTools.Models;
 using CSIModellingTools.Services;
@@ -8,11 +9,21 @@ namespace CSIModellingTools.ViewModels;
 
 public sealed class CotArchViewModel : ObservableObject
 {
+    private const string NoLoadLabel = "None";
+    private const string UdlLoadLabel = "UDL";
+    private const string PointLoadLabel = "Point load at joints";
+
     private readonly CotArchGeometryBuilder _builder = new();
     private readonly CotArchValidator _validator = new();
     private readonly EtabsParametricModellingService _etabs = new();
+    private readonly Sap2000ModellingService _sap2000 = new();
+    private List<string> _lastEtabsFrameSectionsForTension = [];
+    private List<string> _lastSap2000FrameSectionsForTension = [];
+    private List<string> _lastSap2000TensionSections = [];
     private EtabsInstanceInfo? _selectedEtabsInstance;
+    private Sap2000InstanceInfo? _selectedSap2000Instance;
     private string _connectionStatus = "Not connected";
+    private string _sap2000ConnectionStatus = "Not connected";
     private string _modelPrefix = "TA01";
     private double _originX;
     private double _planeY;
@@ -26,7 +37,6 @@ public sealed class CotArchViewModel : ObservableObject
     private string _selectedProfileType = CotArchProfileType.Parabolic.ToString();
     private double _shapeExponent = 2.0;
     private string _customPostStationsText = "";
-    private bool _generateAsPlanarModel = true;
     private string _selectedSupportCondition = CotArchSupportCondition.Pinned.ToString();
     private string _selectedArchReleasePreset = CotArchMemberReleasePreset.FullyContinuous.ToString();
     private string _selectedPostReleasePreset = CotArchMemberReleasePreset.FullyContinuous.ToString();
@@ -38,7 +48,12 @@ public sealed class CotArchViewModel : ObservableObject
     private string _upperBeamSection = "";
     private string _tieSection = "";
     private string _supportColumnSection = "";
+    private string _selectedUpperBeamLoadType = NoLoadLabel;
+    private string _selectedLoadPattern = "";
+    private double _upperBeamUdlKnPerM;
+    private double _upperBeamPointLoadKn;
     private string _generationReport = "Adjust parameters, read ETABS sections, validate, then generate into the selected open ETABS model.";
+    private string _appliedUpperBeamLoadStatus = "Applied loads will be listed after Generate or Update Loads.";
     private CotArchModel _currentModel = new();
 
     public CotArchViewModel()
@@ -48,26 +63,58 @@ public sealed class CotArchViewModel : ObservableObject
         ValidateCommand = new RelayCommand(_ => Validate(true));
         GenerateStructureCommand = new RelayCommand(_ => Draw(false));
         RegenerateStructureCommand = new RelayCommand(_ => Draw(true));
+        UpdateLoadsCommand = new RelayCommand(_ => UpdateLoads());
+        UpdateSap2000LoadsCommand = new RelayCommand(_ => UpdateSap2000Loads());
         ClearGeneratedStructureCommand = new RelayCommand(_ => Clear());
+        RefreshSap2000InstancesCommand = new RelayCommand(_ => RefreshSap2000Instances());
+        ReadSap2000DataCommand = new RelayCommand(_ => ReadSap2000Data());
+        GenerateSap2000StructureCommand = new RelayCommand(_ => DrawSap2000(false));
+        RegenerateSap2000StructureCommand = new RelayCommand(_ => DrawSap2000(true));
+        ClearSap2000StructureCommand = new RelayCommand(_ => ClearSap2000());
         Rebuild();
     }
 
     public ObservableCollection<EtabsInstanceInfo> EtabsInstances { get; } = [];
+    public ObservableCollection<Sap2000InstanceInfo> Sap2000Instances { get; } = [];
     public ObservableCollection<string> FrameSections { get; } = [];
+    public ObservableCollection<string> TensionMemberSections { get; } = [];
+    public ObservableCollection<string> LoadPatterns { get; } = [];
+    public ObservableCollection<CotArchAppliedUpperBeamLoad> AppliedUpperBeamLoads { get; } = [];
     public ObservableCollection<ValidationIssue> Messages { get; } = [];
     public IReadOnlyList<string> ProfileTypes { get; } = Enum.GetNames(typeof(CotArchProfileType));
-    public IReadOnlyList<string> SupportConditions { get; } = Enum.GetNames(typeof(CotArchSupportCondition));
+    public IReadOnlyList<string> SupportConditions { get; } = [CotArchSupportCondition.Pinned.ToString()];
     public IReadOnlyList<string> ReleasePresets { get; } = Enum.GetNames(typeof(CotArchMemberReleasePreset));
+    public IReadOnlyList<string> UpperBeamLoadTypes { get; } = [NoLoadLabel, UdlLoadLabel, PointLoadLabel];
     public ICommand RefreshEtabsInstancesCommand { get; }
     public ICommand ReadEtabsDataCommand { get; }
     public ICommand ValidateCommand { get; }
     public ICommand GenerateStructureCommand { get; }
     public ICommand RegenerateStructureCommand { get; }
+    public ICommand UpdateLoadsCommand { get; }
+    public ICommand UpdateSap2000LoadsCommand { get; }
     public ICommand ClearGeneratedStructureCommand { get; }
+    public ICommand RefreshSap2000InstancesCommand { get; }
+    public ICommand ReadSap2000DataCommand { get; }
+    public ICommand GenerateSap2000StructureCommand { get; }
+    public ICommand RegenerateSap2000StructureCommand { get; }
+    public ICommand ClearSap2000StructureCommand { get; }
 
     public EtabsInstanceInfo? SelectedEtabsInstance { get => _selectedEtabsInstance; set => SetProperty(ref _selectedEtabsInstance, value); }
+    public Sap2000InstanceInfo? SelectedSap2000Instance { get => _selectedSap2000Instance; set => SetProperty(ref _selectedSap2000Instance, value); }
     public string ConnectionStatus { get => _connectionStatus; set => SetProperty(ref _connectionStatus, value); }
-    public string ModelPrefix { get => _modelPrefix; set { if (SetProperty(ref _modelPrefix, value ?? "")) Rebuild(); } }
+    public string Sap2000ConnectionStatus { get => _sap2000ConnectionStatus; set => SetProperty(ref _sap2000ConnectionStatus, value); }
+    public string ModelPrefix
+    {
+        get => _modelPrefix;
+        set
+        {
+            if (SetProperty(ref _modelPrefix, value ?? ""))
+            {
+                ClearAppliedUpperBeamLoads("Applied loads will be listed after Generate or Update Loads.");
+                Rebuild();
+            }
+        }
+    }
     public double OriginX { get => _originX; set { if (SetProperty(ref _originX, Finite(value, 0))) Rebuild(); } }
     public double PlaneY { get => _planeY; set { if (SetProperty(ref _planeY, Finite(value, 0))) Rebuild(); } }
     public double BaseZ { get => _baseZ; set { if (SetProperty(ref _baseZ, Finite(value, -8))) Rebuild(); } }
@@ -80,8 +127,7 @@ public sealed class CotArchViewModel : ObservableObject
     public string SelectedProfileType { get => _selectedProfileType; set { if (SetProperty(ref _selectedProfileType, value ?? CotArchProfileType.Parabolic.ToString())) Rebuild(); } }
     public double ShapeExponent { get => _shapeExponent; set { if (SetProperty(ref _shapeExponent, Math.Max(Finite(value, 2), 1))) Rebuild(); } }
     public string CustomPostStationsText { get => _customPostStationsText; set { if (SetProperty(ref _customPostStationsText, value ?? "")) Rebuild(); } }
-    public bool GenerateAsPlanarModel { get => _generateAsPlanarModel; set { if (SetProperty(ref _generateAsPlanarModel, value)) Rebuild(); } }
-    public string SelectedSupportCondition { get => _selectedSupportCondition; set { if (SetProperty(ref _selectedSupportCondition, value ?? CotArchSupportCondition.Pinned.ToString())) Rebuild(); } }
+    public string SelectedSupportCondition { get => _selectedSupportCondition; set { if (SetProperty(ref _selectedSupportCondition, CotArchSupportCondition.Pinned.ToString())) Rebuild(); } }
     public string SelectedArchReleasePreset { get => _selectedArchReleasePreset; set { if (SetProperty(ref _selectedArchReleasePreset, value ?? CotArchMemberReleasePreset.FullyContinuous.ToString())) Rebuild(); } }
     public string SelectedPostReleasePreset { get => _selectedPostReleasePreset; set { if (SetProperty(ref _selectedPostReleasePreset, value ?? CotArchMemberReleasePreset.FullyContinuous.ToString())) Rebuild(); } }
     public string SelectedTieReleasePreset { get => _selectedTieReleasePreset; set { if (SetProperty(ref _selectedTieReleasePreset, value ?? CotArchMemberReleasePreset.PinnedBothEnds.ToString())) Rebuild(); } }
@@ -92,7 +138,35 @@ public sealed class CotArchViewModel : ObservableObject
     public string UpperBeamSection { get => _upperBeamSection; set { if (SetProperty(ref _upperBeamSection, value ?? "")) Rebuild(); } }
     public string TieSection { get => _tieSection; set { if (SetProperty(ref _tieSection, value ?? "")) Rebuild(); } }
     public string SupportColumnSection { get => _supportColumnSection; set { if (SetProperty(ref _supportColumnSection, value ?? "")) Rebuild(); } }
+    public string SelectedUpperBeamLoadType
+    {
+        get => _selectedUpperBeamLoadType;
+        set
+        {
+            if (SetProperty(ref _selectedUpperBeamLoadType, NormalizeUpperBeamLoadType(value)))
+            {
+                OnPropertyChanged(nameof(UpperBeamLoadInputVisibility));
+                OnPropertyChanged(nameof(UpperBeamUdlInputVisibility));
+                OnPropertyChanged(nameof(UpperBeamPointLoadInputVisibility));
+                Rebuild();
+            }
+        }
+    }
+
+    public Visibility UpperBeamLoadInputVisibility =>
+        IsUpperBeamLoadEnabled ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility UpperBeamUdlInputVisibility =>
+        ParseUpperBeamLoadType(SelectedUpperBeamLoadType) == CotArchUpperBeamLoadType.Udl ? Visibility.Visible : Visibility.Collapsed;
+
+    public Visibility UpperBeamPointLoadInputVisibility =>
+        ParseUpperBeamLoadType(SelectedUpperBeamLoadType) == CotArchUpperBeamLoadType.PointLoadAtJoints ? Visibility.Visible : Visibility.Collapsed;
+
+    public string SelectedLoadPattern { get => _selectedLoadPattern; set { if (SetProperty(ref _selectedLoadPattern, value ?? "")) Rebuild(); } }
+    public double UpperBeamUdlKnPerM { get => _upperBeamUdlKnPerM; set { if (SetProperty(ref _upperBeamUdlKnPerM, Math.Abs(Finite(value, 0)))) Rebuild(); } }
+    public double UpperBeamPointLoadKn { get => _upperBeamPointLoadKn; set { if (SetProperty(ref _upperBeamPointLoadKn, Math.Abs(Finite(value, 0)))) Rebuild(); } }
     public string GenerationReport { get => _generationReport; set => SetProperty(ref _generationReport, value); }
+    public string AppliedUpperBeamLoadStatus { get => _appliedUpperBeamLoadStatus; set => SetProperty(ref _appliedUpperBeamLoadStatus, value); }
 
     public CotArchModel CurrentModel
     {
@@ -133,8 +207,37 @@ public sealed class CotArchViewModel : ObservableObject
         Replace(EtabsInstances, result.Instances);
         SelectedEtabsInstance = EtabsInstances.FirstOrDefault(instance => instance.Id == result.SelectedInstanceId) ?? EtabsInstances.FirstOrDefault();
         Replace(FrameSections, result.FrameSections);
+        _lastEtabsFrameSectionsForTension = result.FrameSections;
+        RefreshTensionMemberSections();
+        Replace(LoadPatterns, result.LoadPatterns);
         PickSections();
+        PickLoadPattern();
         ConnectionStatus = result.Message;
+        Show(result.Warnings, result.Message, result.IsError);
+    }
+
+    private void RefreshSap2000Instances()
+    {
+        Sap2000InstanceListResult result = _sap2000.ListSap2000Instances();
+        Replace(Sap2000Instances, result.Instances);
+        SelectedSap2000Instance = Sap2000Instances.FirstOrDefault();
+        Sap2000ConnectionStatus = result.Message;
+        Show(result.Warnings, result.Message, result.IsError);
+    }
+
+    private void ReadSap2000Data()
+    {
+        Sap2000ModelDataResult result = _sap2000.ListModelData(new Sap2000ModelDataRequest { Sap2000InstanceId = SelectedSap2000Instance?.Id });
+        Replace(Sap2000Instances, result.Instances);
+        SelectedSap2000Instance = Sap2000Instances.FirstOrDefault(instance => instance.Id == result.SelectedInstanceId) ?? Sap2000Instances.FirstOrDefault();
+        Replace(FrameSections, result.FrameSections);
+        _lastSap2000FrameSectionsForTension = result.FrameSections;
+        _lastSap2000TensionSections = result.TensionMemberSections;
+        RefreshTensionMemberSections();
+        Replace(LoadPatterns, result.LoadPatterns);
+        PickSections();
+        PickLoadPattern();
+        Sap2000ConnectionStatus = result.Message;
         Show(result.Warnings, result.Message, result.IsError);
     }
 
@@ -164,6 +267,45 @@ public sealed class CotArchViewModel : ObservableObject
         });
 
         GenerationReport = result.Message;
+        RefreshAppliedUpperBeamLoads(result);
+        Show(result.Warnings, result.Message, result.IsError);
+    }
+
+    private void UpdateLoads()
+    {
+        if (!Validate(true))
+        {
+            GenerationReport = "Load update blocked: resolve critical validation messages.";
+            return;
+        }
+
+        CotArchDrawResult result = _etabs.UpdateCotArchLoads(new CotArchLoadUpdateRequest
+        {
+            EtabsInstanceId = SelectedEtabsInstance?.Id,
+            Model = CurrentModel
+        });
+
+        GenerationReport = result.Message;
+        RefreshAppliedUpperBeamLoads(result);
+        Show(result.Warnings, result.Message, result.IsError);
+    }
+
+    private void UpdateSap2000Loads()
+    {
+        if (!Validate(true))
+        {
+            GenerationReport = "SAP2000 load update blocked: resolve critical validation messages.";
+            return;
+        }
+
+        CotArchDrawResult result = _sap2000.UpdateCotArchLoads(new Sap2000CotArchLoadUpdateRequest
+        {
+            Sap2000InstanceId = SelectedSap2000Instance?.Id,
+            Model = CurrentModel
+        });
+
+        GenerationReport = result.Message;
+        RefreshAppliedUpperBeamLoads(result);
         Show(result.Warnings, result.Message, result.IsError);
     }
 
@@ -177,6 +319,43 @@ public sealed class CotArchViewModel : ObservableObject
         });
 
         GenerationReport = result.Message;
+        if (!result.IsError)
+            ClearAppliedUpperBeamLoads("No upper-beam loads are currently listed for this CoT Arch model.");
+        Show(result.Warnings, result.Message, result.IsError);
+    }
+
+    private void DrawSap2000(bool replace)
+    {
+        if (!Validate(true))
+        {
+            GenerationReport = "SAP2000 generation blocked: resolve critical validation messages.";
+            return;
+        }
+
+        CotArchDrawResult result = _sap2000.DrawCotArch(new Sap2000CotArchDrawRequest
+        {
+            Sap2000InstanceId = SelectedSap2000Instance?.Id,
+            Model = CurrentModel,
+            ReplaceExistingStructure = replace
+        });
+
+        GenerationReport = result.Message + Environment.NewLine + "Tension tie: SAP2000 uses a cable/tendon object when the selected tie property is a cable/tendon section; otherwise it keeps the frame workflow.";
+        RefreshAppliedUpperBeamLoads(result);
+        Show(result.Warnings, result.Message, result.IsError);
+    }
+
+    private void ClearSap2000()
+    {
+        CotArchDrawResult result = _sap2000.ClearCotArch(new Sap2000CotArchClearRequest
+        {
+            Sap2000InstanceId = SelectedSap2000Instance?.Id,
+            ModelPrefix = CurrentModel.ModelPrefix,
+            GroupName = CurrentModel.GroupName
+        });
+
+        GenerationReport = result.Message;
+        if (!result.IsError)
+            ClearAppliedUpperBeamLoads("No upper-beam loads are currently listed for this CoT Arch model.");
         Show(result.Warnings, result.Message, result.IsError);
     }
 
@@ -204,29 +383,94 @@ public sealed class CotArchViewModel : ObservableObject
             UpperBeamSection = UpperBeamSection,
             TieSection = TieSection,
             SupportColumnSection = SupportColumnSection,
-            GenerateAsPlanarModel = GenerateAsPlanarModel,
-            SupportCondition = ParseEnum(SelectedSupportCondition, CotArchSupportCondition.Pinned),
+            GenerateAsPlanarModel = false,
+            SupportCondition = CotArchSupportCondition.Pinned,
             ArchReleasePreset = ParseEnum(SelectedArchReleasePreset, CotArchMemberReleasePreset.FullyContinuous),
             PostReleasePreset = ParseEnum(SelectedPostReleasePreset, CotArchMemberReleasePreset.FullyContinuous),
             TieReleasePreset = ParseEnum(SelectedTieReleasePreset, CotArchMemberReleasePreset.PinnedBothEnds),
             BeamReleasePreset = ParseEnum(SelectedBeamReleasePreset, CotArchMemberReleasePreset.FullyContinuous),
-            SupportColumnReleasePreset = ParseEnum(SelectedSupportColumnReleasePreset, CotArchMemberReleasePreset.FullyContinuous)
+            SupportColumnReleasePreset = ParseEnum(SelectedSupportColumnReleasePreset, CotArchMemberReleasePreset.FullyContinuous),
+            UpperBeamLoadType = ParseUpperBeamLoadType(SelectedUpperBeamLoadType),
+            UpperBeamLoadPattern = IsUpperBeamLoadEnabled ? SelectedLoadPattern : "",
+            UpperBeamUdlKnPerM = UpperBeamUdlKnPerM,
+            UpperBeamPointLoadKn = UpperBeamPointLoadKn
         });
     }
 
     private void PickSections()
     {
         string first = FrameSections.FirstOrDefault() ?? "";
-        ArchSection = Pick(ArchSection, first);
-        PostSection = Pick(PostSection, first);
-        UpperBeamSection = Pick(UpperBeamSection, first);
-        TieSection = Pick(TieSection, first);
-        SupportColumnSection = Pick(SupportColumnSection, first);
+        string firstTension = TensionMemberSections.FirstOrDefault() ?? first;
+        ArchSection = PickTension(ArchSection, firstTension);
+        PostSection = PickTension(PostSection, firstTension);
+        UpperBeamSection = PickTension(UpperBeamSection, firstTension);
+        TieSection = PickTension(TieSection, firstTension);
+        SupportColumnSection = PickTension(SupportColumnSection, firstTension);
     }
 
-    private string Pick(string current, string fallback)
+    private void PickLoadPattern()
     {
-        return current.Length > 0 && FrameSections.Contains(current) ? current : fallback;
+        if (SelectedLoadPattern.Length == 0 || !LoadPatterns.Contains(SelectedLoadPattern))
+            SelectedLoadPattern = LoadPatterns.FirstOrDefault() ?? "";
+    }
+
+    private void RefreshAppliedUpperBeamLoads(CotArchDrawResult result)
+    {
+        if (result.IsError)
+        {
+            AppliedUpperBeamLoadStatus = "Applied load list was not refreshed because the CSI operation did not complete.";
+            return;
+        }
+
+        Replace(AppliedUpperBeamLoads, result.AppliedUpperBeamLoads);
+        AppliedUpperBeamLoadStatus = AppliedUpperBeamLoads.Count == 0
+            ? "No upper-beam loads are currently listed for this CoT Arch model."
+            : $"{AppliedUpperBeamLoads.Count} upper-beam load row(s) listed from the CSI model.";
+    }
+
+    private void ClearAppliedUpperBeamLoads(string status)
+    {
+        AppliedUpperBeamLoads.Clear();
+        AppliedUpperBeamLoadStatus = status;
+    }
+
+    private string PickTension(string current, string fallback)
+    {
+        return current.Length > 0 && TensionMemberSections.Contains(current) ? current : fallback;
+    }
+
+    private void RefreshTensionMemberSections()
+    {
+        Replace(TensionMemberSections, _lastEtabsFrameSectionsForTension
+            .Concat(_lastSap2000FrameSectionsForTension)
+            .Concat(_lastSap2000TensionSections)
+            .Where(section => !string.IsNullOrWhiteSpace(section))
+            .Select(section => section.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase));
+    }
+
+    private bool IsUpperBeamLoadEnabled => ParseUpperBeamLoadType(SelectedUpperBeamLoadType) != CotArchUpperBeamLoadType.None;
+
+    private static string NormalizeUpperBeamLoadType(string? value)
+    {
+        string text = (value ?? "").Trim();
+        if (string.Equals(text, UdlLoadLabel, StringComparison.OrdinalIgnoreCase))
+            return UdlLoadLabel;
+        if (string.Equals(text, PointLoadLabel, StringComparison.OrdinalIgnoreCase))
+            return PointLoadLabel;
+
+        return NoLoadLabel;
+    }
+
+    private static CotArchUpperBeamLoadType ParseUpperBeamLoadType(string? value)
+    {
+        string text = NormalizeUpperBeamLoadType(value);
+        if (string.Equals(text, UdlLoadLabel, StringComparison.OrdinalIgnoreCase))
+            return CotArchUpperBeamLoadType.Udl;
+        if (string.Equals(text, PointLoadLabel, StringComparison.OrdinalIgnoreCase))
+            return CotArchUpperBeamLoadType.PointLoadAtJoints;
+
+        return CotArchUpperBeamLoadType.None;
     }
 
     private static (List<double>? Stations, string Error) ParseCustomPostStations(string text)

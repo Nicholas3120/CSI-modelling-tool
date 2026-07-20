@@ -14,7 +14,7 @@ public sealed class CotArchValidator
         Critical(result, string.IsNullOrWhiteSpace(input.ModelPrefix), "Model prefix is required.");
         Critical(result, !double.IsFinite(input.Span) || input.Span <= 0, "Span must be greater than zero.");
         Critical(result, !double.IsFinite(input.Rise) || input.Rise <= 0, "Arch rise must be greater than zero.");
-        Critical(result, !double.IsFinite(input.UpperBeamZ) || input.UpperBeamZ <= input.SpringingZ + input.Rise, "Upper beam Z must be above springing Z plus rise.");
+        Critical(result, !double.IsFinite(input.UpperBeamZ) || input.UpperBeamZ < input.SpringingZ + input.Rise - Tolerance, "Upper beam Z must be at or above springing Z plus rise.");
         Critical(result, !double.IsFinite(input.SpringingZ) || input.SpringingZ <= input.BaseZ, "Springing Z must be above base Z.");
         Critical(result, input.PostCount < 3, "Post count must be at least 3.");
         Critical(result, input.ArchSegmentsPerPostBay < 1, "Arch segments per post bay must be at least 1.");
@@ -27,7 +27,8 @@ public sealed class CotArchValidator
             Critical(result, true, input.CustomPostStationsError);
 
         ValidateCustomStations(result, input);
-        ValidateSections(result, input);
+        ValidateSections(result, input, model);
+        ValidateUpperBeamLoading(result, input);
         ValidateTopology(result, model);
 
         if (!result.HasCriticalIssues)
@@ -58,19 +59,34 @@ public sealed class CotArchValidator
         }
     }
 
-    private static void ValidateSections(ParametricValidationResult result, CotArchInput input)
+    private static void ValidateSections(ParametricValidationResult result, CotArchInput input, CotArchModel model)
     {
         foreach ((string label, string section) in new[]
         {
             ("arch", input.ArchSection),
-            ("vertical posts", input.PostSection),
             ("upper beam", input.UpperBeamSection),
             ("tension tie", input.TieSection),
             ("support columns", input.SupportColumnSection)
         })
         {
-            Critical(result, string.IsNullOrWhiteSpace(section), $"Select an ETABS frame section for {label}.");
+            Critical(result, string.IsNullOrWhiteSpace(section), $"Select a CSI frame, cable, or tendon section for {label}.");
         }
+
+        if (model.VerticalPostCount > 0)
+            Critical(result, string.IsNullOrWhiteSpace(input.PostSection), "Select a CSI frame, cable, or tendon section for vertical posts.");
+    }
+
+    private static void ValidateUpperBeamLoading(ParametricValidationResult result, CotArchInput input)
+    {
+        if (input.UpperBeamLoadType == CotArchUpperBeamLoadType.None)
+            return;
+
+        Critical(result, string.IsNullOrWhiteSpace(input.UpperBeamLoadPattern), "Select an ETABS load pattern for the upper beam load.");
+
+        if (input.UpperBeamLoadType == CotArchUpperBeamLoadType.Udl)
+            Critical(result, !double.IsFinite(input.UpperBeamUdlKnPerM) || input.UpperBeamUdlKnPerM <= Tolerance, "Upper beam UDL must be greater than zero.");
+        else if (input.UpperBeamLoadType == CotArchUpperBeamLoadType.PointLoadAtJoints)
+            Critical(result, !double.IsFinite(input.UpperBeamPointLoadKn) || input.UpperBeamPointLoadKn <= Tolerance, "Upper beam point load per joint must be greater than zero.");
     }
 
     private static void ValidateTopology(ParametricValidationResult result, CotArchModel model)
@@ -92,7 +108,10 @@ public sealed class CotArchValidator
 
         int expectedArch = Math.Max(0, (model.PostBottomNodes.Count - 1) * input.ArchSegmentsPerPostBay);
         Critical(result, model.ArchSegmentCount != expectedArch, $"Expected {expectedArch} arch segment(s).");
-        Critical(result, model.VerticalPostCount != model.PostBottomNodes.Count, $"Expected {model.PostBottomNodes.Count} vertical post(s).");
+        int expectedVerticalPosts = model.PostBottomNodes
+            .Zip(model.PostTopNodes, (bottom, top) => Distance(bottom, top) > Tolerance)
+            .Count(hasLength => hasLength);
+        Critical(result, model.VerticalPostCount != expectedVerticalPosts, $"Expected {expectedVerticalPosts} vertical post frame member(s).");
         Critical(result, model.UpperBeamSegmentCount != Math.Max(0, model.PostTopNodes.Count - 1), $"Expected {Math.Max(0, model.PostTopNodes.Count - 1)} upper-beam segment(s).");
         Critical(result, model.TensionTieCount != 1, "Expected exactly one tension tie.");
         Critical(result, model.SupportColumnCount != 2, "Expected exactly two support columns.");
@@ -120,9 +139,15 @@ public sealed class CotArchValidator
             CotArchNode top = model.PostTopNodes[index];
             Nearly(result, bottom.X, top.X, $"Post {index} bottom/top X must match.");
             Nearly(result, bottom.Y, top.Y, $"Post {index} bottom/top Y must match.");
-            Critical(result, top.Z <= bottom.Z + Tolerance, $"Post {index} length must be positive.");
+            Critical(result, top.Z < bottom.Z - Tolerance, $"Post {index} top is below the arch and cannot form a vertical post.");
             Nearly(result, bottom.Z, CotArchGeometryBuilder.EvaluateArchZ(input, bottom.Xi), $"Post {index} bottom must lie on the arch.");
         }
+
+        int zeroLengthPostNodes = model.PostBottomNodes
+            .Zip(model.PostTopNodes, (bottom, top) => Distance(bottom, top) <= Tolerance)
+            .Count(isZero => isZero);
+        if (zeroLengthPostNodes > 0)
+            Info(result, $"{zeroLengthPostNodes} post station(s) have zero height and will be modelled as shared arch/beam joints without vertical post frame objects.");
 
         ValidateSpringingConnectivity(result, model);
         ValidateArchSymmetry(result, model);

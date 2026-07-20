@@ -7372,6 +7372,11 @@ public sealed partial class EtabsParametricModellingService
 
     private static void TryClearPointForceLoads(ETABSv1.cSapModel sapModel, string pointName, List<string> warnings)
     {
+        TryClearPointForceLoads(sapModel, pointName, warnings, "");
+    }
+
+    private static void TryClearPointForceLoads(ETABSv1.cSapModel sapModel, string pointName, List<string> warnings, string loadPatternFilter)
+    {
         try
         {
             int numberItems = 0;
@@ -7404,7 +7409,10 @@ public sealed partial class EtabsParametricModellingService
             if (ret != 0 || loadPatterns.Length == 0)
                 return;
 
-            foreach (string loadPattern in loadPatterns.Where(pattern => !string.IsNullOrWhiteSpace(pattern)).Distinct(StringComparer.OrdinalIgnoreCase))
+            foreach (string loadPattern in loadPatterns
+                .Where(pattern => !string.IsNullOrWhiteSpace(pattern))
+                .Where(pattern => string.IsNullOrWhiteSpace(loadPatternFilter) || string.Equals(pattern, loadPatternFilter, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 int deleteRet = sapModel.PointObj.DeleteLoadForce(pointName, loadPattern, EtabsObjects);
                 if (deleteRet != 0)
@@ -7469,12 +7477,12 @@ public sealed partial class EtabsParametricModellingService
             int[] loadTypes = [];
             string[] coordinateSystems = [];
             int[] directions = [];
+            double[] relativeDistance1 = [];
+            double[] relativeDistance2 = [];
             double[] distance1 = [];
             double[] distance2 = [];
             double[] value1 = [];
             double[] value2 = [];
-            double[] absoluteDistance1 = [];
-            double[] absoluteDistance2 = [];
 
             int ret = sapModel.FrameObj.GetLoadDistributed(
                 frameName,
@@ -7484,12 +7492,12 @@ public sealed partial class EtabsParametricModellingService
                 ref loadTypes,
                 ref coordinateSystems,
                 ref directions,
+                ref relativeDistance1,
+                ref relativeDistance2,
                 ref distance1,
                 ref distance2,
                 ref value1,
                 ref value2,
-                ref absoluteDistance1,
-                ref absoluteDistance2,
                 EtabsObjects);
 
             if (ret != 0 || loadPatterns.Length == 0)
@@ -7512,6 +7520,11 @@ public sealed partial class EtabsParametricModellingService
     }
 
     private static void TryClearFramePointLoads(ETABSv1.cSapModel sapModel, string frameName, List<string> warnings)
+    {
+        TryClearFramePointLoads(sapModel, frameName, warnings, "");
+    }
+
+    private static void TryClearFramePointLoads(ETABSv1.cSapModel sapModel, string frameName, List<string> warnings, string loadPatternFilter)
     {
         try
         {
@@ -7541,7 +7554,10 @@ public sealed partial class EtabsParametricModellingService
             if (ret != 0 || loadPatterns.Length == 0)
                 return;
 
-            foreach (string loadPattern in loadPatterns.Where(pattern => !string.IsNullOrWhiteSpace(pattern)).Distinct(StringComparer.OrdinalIgnoreCase))
+            foreach (string loadPattern in loadPatterns
+                .Where(pattern => !string.IsNullOrWhiteSpace(pattern))
+                .Where(pattern => string.IsNullOrWhiteSpace(loadPatternFilter) || string.Equals(pattern, loadPatternFilter, StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase))
             {
                 int deleteRet = sapModel.FrameObj.DeleteLoadPoint(frameName, loadPattern, EtabsObjects);
                 if (deleteRet != 0)

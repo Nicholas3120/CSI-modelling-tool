@@ -54,7 +54,7 @@ public sealed class CityOfTomorrowPreviewControl : FrameworkElement
         foreach (CityMember member in model.Members.OrderBy(m => m.IsTensionOnly ? 1 : 0))
         {
             if (!nodes.TryGetValue(member.StartNodeKey, out CityNode? start) || !nodes.TryGetValue(member.EndNodeKey, out CityNode? end)) continue;
-            var pen = new Pen(new SolidColorBrush(ColorFor(member)), member.IsTensionOnly ? 2 : member.Kind == CityMemberKind.Support ? 3.2 : 2.7)
+            var pen = new Pen(new SolidColorBrush(ColorFor(member)), member.IsTensionOnly ? 2 : 2.7)
             { StartLineCap = PenLineCap.Round, EndLineCap = PenLineCap.Round };
             if (string.IsNullOrWhiteSpace(member.SectionName)) pen.DashStyle = DashStyles.Dash;
             dc.DrawLine(pen, Map(start), Map(end));
@@ -80,7 +80,6 @@ public sealed class CityOfTomorrowPreviewControl : FrameworkElement
         if (member.Group == CityMemberGroups.GlobalTie) return Color.FromRgb(220, 38, 38);
         if (member.IsTensionOnly) return Color.FromRgb(37, 99, 235);
         if (member.Group == CityMemberGroups.MidRail) return Color.FromRgb(220, 38, 38);
-        if (member.Kind == CityMemberKind.Support) return Color.FromRgb(124, 58, 237);
         if (member.Group == CityMemberGroups.VerticalPost) return Color.FromRgb(5, 150, 105);
         return Color.FromRgb(51, 65, 85);
     }

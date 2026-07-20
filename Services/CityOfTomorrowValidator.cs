@@ -6,7 +6,7 @@ public sealed class CityOfTomorrowValidator
 {
     private const double Tolerance = 0.000001;
 
-    public ParametricValidationResult Validate(CityOfTomorrowModel model)
+    public ParametricValidationResult Validate(CityOfTomorrowModel model, bool validateTopChordLoading = true)
     {
         var result = new ParametricValidationResult();
         CityOfTomorrowInput input = model.Input;
@@ -23,17 +23,22 @@ public sealed class CityOfTomorrowValidator
 
         foreach ((string label, string value) in new Dictionary<string, string>
         {
-            ["top chord"] = input.TopChordSection, ["intermediate rail"] = input.MidRailSection,
-            ["bottom chord"] = input.BottomChordSection, ["vertical posts"] = input.VerticalPostSection,
-            ["tower"] = input.TowerSection, ["side frame"] = input.SideFrameSection
+            ["top chord"] = input.TopChordSection,
+            ["intermediate rail"] = input.MidRailSection,
+            ["bottom chord"] = input.BottomChordSection,
+            ["vertical posts"] = input.VerticalPostSection,
+            ["tower"] = input.TowerSection,
+            ["side strut"] = input.SideFrameSection,
+            ["side vertical"] = input.SideVerticalSection,
+            ["side X1"] = input.SideX1Section,
+            ["side X2"] = input.SideX2Section,
+            ["cables/backstays"] = input.CableSection,
+            ["global tie/tendon"] = input.TieCableSection
         })
-            Critical(result, string.IsNullOrWhiteSpace(value), $"Select a CSI frame section for {label}.");
+            Critical(result, string.IsNullOrWhiteSpace(value), $"Select a CSI frame, cable, or tendon section for {label}.");
 
-        foreach ((string label, string value) in new Dictionary<string, string>
-        {
-            ["cables/backstays"] = input.CableSection, ["global tie/tendon"] = input.TieCableSection
-        })
-            Critical(result, string.IsNullOrWhiteSpace(value), $"Select a CSI cable or tendon section for {label}.");
+        if (validateTopChordLoading)
+            ValidateTopChordLoading(result, input);
 
         var nodes = model.Nodes.ToDictionary(node => node.Key, StringComparer.OrdinalIgnoreCase);
         for (int i = 0; i <= p && n >= 1; i++)
@@ -65,6 +70,19 @@ public sealed class CityOfTomorrowValidator
             result.Issues.Add(new ValidationIssue { Severity = ValidationSeverity.Warning, Message = "Use a nonlinear CSI load case for tension-only cable behavior and define project-specific pretension, large-displacement and out-of-plane assumptions." });
         }
         return result;
+    }
+
+    private static void ValidateTopChordLoading(ParametricValidationResult result, CityOfTomorrowInput input)
+    {
+        if (input.TopChordLoadType == CityTopChordLoadType.None)
+            return;
+
+        Critical(result, string.IsNullOrWhiteSpace(input.TopChordLoadPattern), "Select a CSI load pattern for the top chord load.");
+
+        if (input.TopChordLoadType == CityTopChordLoadType.Udl)
+            Critical(result, !double.IsFinite(input.TopChordUdlKnPerM) || input.TopChordUdlKnPerM <= Tolerance, "Top chord UDL must be greater than zero.");
+        else if (input.TopChordLoadType == CityTopChordLoadType.PointLoadAtJoints)
+            Critical(result, !double.IsFinite(input.TopChordPointLoadKn) || input.TopChordPointLoadKn <= Tolerance, "Top chord point load per joint must be greater than zero.");
     }
 
     private static int Count(CityOfTomorrowModel model, string group) => model.Members.Count(member => member.Group == group);
