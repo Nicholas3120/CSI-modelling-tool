@@ -6,6 +6,7 @@ namespace CSIModellingTools.Models;
 public sealed class SectionPropertyDataRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
 }
 
 public sealed class SectionPropertyDataResult
@@ -13,6 +14,7 @@ public sealed class SectionPropertyDataResult
     public bool IsError { get; set; }
     public string Message { get; set; } = "";
     public List<EtabsInstanceInfo> Instances { get; set; } = [];
+    public List<Sap2000InstanceInfo> Sap2000Instances { get; set; } = [];
     public string SelectedInstanceId { get; set; } = "";
     public List<EtabsMaterialPropertyRow> Materials { get; set; } = [];
     public List<EtabsFramePropertyRow> FrameProperties { get; set; } = [];
@@ -23,6 +25,7 @@ public sealed class SectionPropertyDataResult
 public sealed class SteelSectionCatalogRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public string DatabaseFile { get; set; } = "";
     public string ShapeType { get; set; } = "I";
 }
@@ -38,6 +41,7 @@ public sealed class SteelSectionCatalogResult
 public sealed class SteelSectionImportRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public string PropertyName { get; set; } = "";
     public string MaterialName { get; set; } = "";
     public string DatabaseFile { get; set; } = "";
@@ -91,6 +95,7 @@ public sealed class SectionPropertyUpdateResult
 public sealed class MaterialPropertyUpdateRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public string Name { get; set; } = "";
     public string MaterialType { get; set; } = "Concrete";
     public double ElasticModulusMpa { get; set; } = 30000.0;
@@ -105,6 +110,7 @@ public sealed class MaterialPropertyUpdateRequest
 public sealed class FramePropertyUpdateRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public string Name { get; set; } = "";
     public string ShapeType { get; set; } = "Concrete Rectangular";
     public string MaterialName { get; set; } = "";
@@ -119,6 +125,7 @@ public sealed class FramePropertyUpdateRequest
 public sealed class AreaPropertyUpdateRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public string Name { get; set; } = "";
     public string AreaType { get; set; } = "Slab";
     public string SlabType { get; set; } = "Slab";
@@ -157,6 +164,7 @@ public enum TaperedReferenceLine
 public sealed class TaperedSteelBaseSectionRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public string SectionName { get; set; } = "";
 }
 
@@ -171,6 +179,7 @@ public sealed class TaperedSteelSelectionResult
 public sealed class TaperedSteelApplyRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public TaperedSteelSelection Selection { get; set; } = new();
     public double TipDepthM { get; set; } = 0.2;
     public TaperedTipEnd TipEnd { get; set; } = TaperedTipEnd.JEnd;
@@ -258,6 +267,7 @@ public sealed class TaperedSteelStationPreview
 public sealed class SectionPropertyDeleteRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public string Name { get; set; } = "";
 }
 

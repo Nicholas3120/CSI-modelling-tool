@@ -32,6 +32,7 @@ public sealed class Sap2000ModelDataResult
     public string Message { get; set; } = "";
     public List<Sap2000InstanceInfo> Instances { get; set; } = [];
     public string SelectedInstanceId { get; set; } = "";
+    public List<string> Materials { get; set; } = [];
     public List<string> FrameSections { get; set; } = [];
     public List<string> CableSections { get; set; } = [];
     public List<string> TendonSections { get; set; } = [];

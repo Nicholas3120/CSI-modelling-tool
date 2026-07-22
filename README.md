@@ -66,7 +66,7 @@ For SAP2000 City of Tomorrow:
 
 1. Open SAP2000.
 2. Use the `SAP2000 Connection` panel in the `City of Tomorrow` tab.
-3. Click `Refresh SAP2000 Instances`, then `Read SAP2000 Sections`.
+3. Click `Refresh Instances` on the SAP2000 row, then `Read SAP2000 Sections`.
 4. Assign frame/cable/tendon sections.
 5. Generate, regenerate, or clear the SAP2000 structure.
 
@@ -203,96 +203,52 @@ ETABS features:
 
 The tab also shows calculated arch segment count, post count, beam segment count, node count, frame count, group name, preview geometry, and validation messages.
 
-### ETABS Model Setup
+### CSI Model Setup
 
-This top-level tab currently groups ETABS setup/editing workflows.
+This top-level tab groups CSI setup/editing workflows.
 
 #### Frame Assignments
 
-The `Frame Assignments` sub-tab edits frame objects that already exist in ETABS.
+The `Frame Assignments` sub-tab groups existing-frame assignment work and frame-property setup.
 
-- Import selected ETABS frames.
-- Import frames from a named ETABS group.
+Inner tabs:
+
+- `Assignments` edits frame objects that already exist in ETABS or SAP2000.
+- `Frame Properties` groups frame section definitions, steel catalog import, and ETABS tapered steel tools.
+
+Assignment tools:
+
+- Import selected CSI frames.
+- Import frames from a named CSI group.
 - View frame name, label, story, group, current section, new section, point I/J, and length.
 - Preview selected frames in 2D or 3D.
 - Apply a bulk section to checked rows.
 - Check or uncheck all rows.
-- Update checked frame section assignments in ETABS.
-- Assign selected ETABS frames to an existing or new ETABS group.
+- Update checked frame section assignments in the active CSI model.
+- Assign selected CSI frames to an existing or new CSI group.
 - Apply a bulk section update to a whole group.
 - Update checked frame distributed loads by pattern, line load, or area load with panel width.
 - Optionally replace existing loads in the selected pattern on checked frames.
 
-### Loads
+Frame Properties contains:
 
-The `Loads` tab manages ETABS load patterns, static load cases, and response combinations.
+- `Frame Sections` for manual frame-section create/update/delete.
+- `Steel Catalog` for steel database import into CSI frame properties.
+- `Tapered Steel (ETABS)` for ETABS nonprismatic/tapered steel tools.
 
-Load pattern tools:
-
-- Read ETABS load patterns.
-- Create new patterns.
-- Duplicate patterns.
-- Edit type and self-weight multiplier.
-- Apply selected pattern to ETABS.
-- Mark rows for deletion and delete marked rows.
-- Show usage and row status.
-
-Static load case tools:
-
-- Read ETABS static load cases.
-- Create or duplicate cases.
-- Add, remove, and clear load items.
-- Edit load pattern and scale factor rows.
-- Apply selected case to ETABS.
-- Mark cases for deletion and delete marked rows.
-
-Response combination tools:
-
-- Read ETABS response combinations.
-- Create or duplicate combinations.
-- Add load case or combination items.
-- Edit source type, source name, and scale factor.
-- Apply selected combination to ETABS.
-- Mark combinations for deletion and delete marked rows.
-- Maintain a load-combination factor matrix for review/editing.
-
-### Properties
-
-The `Properties` tab manages ETABS materials, frame sections, slab/wall properties, steel imports, and tapered sections.
-
-Top-level quick editors:
-
-- Add/update material.
-- Load database steel sections.
-- Import a steel section.
-- Add/update frame section.
-- Add/update slab/wall property.
-
-Material tools:
-
-- List existing ETABS materials.
-- Create, edit, apply, and delete materials.
-- Edit material type, elastic modulus, Poisson ratio, unit weight, thermal expansion, concrete strength, steel yield strength, and steel ultimate strength.
-
-Steel import tools:
+Steel Catalog tools:
 
 - Load steel sections from `PropertyLibraries/BSShapes2006.xml`.
 - Filter by shape.
-- Select ETABS material.
+- Select CSI material.
 - Import one selected section or multiple checked sections.
-- Set ETABS property names before import.
+- Set CSI property names before import.
 
 Frame section tools:
 
-- List existing ETABS frame properties.
+- List existing ETABS or SAP2000 frame properties.
 - Create, edit, apply, and delete frame sections.
 - Edit shape, material, role, depth/diameter, width, flange/wall thickness, and web/wall thickness.
-
-Slab/wall property tools:
-
-- List existing ETABS area properties.
-- Create, edit, apply, and delete slab/wall properties.
-- Edit area type, slab type, shell type, material, and thickness.
 
 Tapered steel tools:
 
@@ -303,6 +259,66 @@ Tapered steel tools:
 - Create ETABS nonprismatic frame properties.
 - Assign generated tapered sections to selected ETABS members.
 - Review the 3D tapered preview and generated station table.
+
+#### Materials
+
+The `Materials` sub-tab manages ETABS or SAP2000 materials.
+
+- List existing ETABS or SAP2000 materials.
+- Create, edit, apply, and delete materials.
+- Edit material type, elastic modulus, Poisson ratio, unit weight, thermal expansion, concrete strength, steel yield strength, and steel ultimate strength.
+
+#### Area Properties
+
+The `Area Properties` sub-tab manages ETABS slab/wall properties and SAP2000 shell area properties.
+
+- List existing ETABS or SAP2000 area properties.
+- Create, edit, apply, and delete slab/wall properties.
+- Edit area type, slab type, shell type, material, and thickness.
+
+#### ModelMigration
+
+The `ModelMigration` sub-tab stages source/target CSI setup migration.
+
+- Press any `Refresh Instances` button to refresh the matching ETABS or SAP2000 instance lists on both `From Model` and `To Model`.
+- Press any `Read Setup` button to refresh both selected `From Model` and `To Model` setup summaries before building a migration preview.
+- Filter migration scope categories before preview.
+- Use the `From Model Items` search bar to quickly find preview rows by category, item name, status, or action.
+- Review `From Model` items that do not already have the same name in the `To Model`, then include only the selected materials, member definitions, load patterns, or other setup rows.
+- Apply checked common setup items through the same ETABS/SAP2000 update services used by the setup tabs; cable/tendon property migration remains read-only until a write service is added.
+
+### Loads
+
+The `Loads` tab manages ETABS or SAP2000 load patterns, static load cases, and response combinations.
+
+Load pattern tools:
+
+- Read ETABS or SAP2000 load patterns.
+- Create new patterns.
+- Duplicate patterns.
+- Edit type and self-weight multiplier.
+- Apply selected pattern to the active CSI model.
+- Mark rows for deletion and delete marked rows.
+- Show usage and row status.
+
+Static load case tools:
+
+- Read ETABS or SAP2000 static load cases.
+- Create or duplicate cases.
+- Add, remove, and clear load items.
+- Edit load pattern and scale factor rows.
+- Apply selected case to the active CSI model.
+- Mark cases for deletion and delete marked rows.
+
+Response combination tools:
+
+- Read ETABS or SAP2000 response combinations.
+- Create or duplicate combinations.
+- Add load case or combination items.
+- Edit source type, source name, and scale factor.
+- Apply selected combination to the active CSI model.
+- Mark combinations for deletion and delete marked rows.
+- Maintain a load-combination factor matrix for review/editing.
 
 ### Dome Structure
 

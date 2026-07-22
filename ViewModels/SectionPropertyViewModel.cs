@@ -9,14 +9,22 @@ namespace CSIModellingTools.ViewModels;
 public sealed class SectionPropertyViewModel : ObservableObject
 {
     private const double MillimetresPerMetre = 1000.0;
+    private const string EtabsProduct = "ETABS";
+    private const string Sap2000Product = "SAP2000";
 
     private readonly EtabsParametricModellingService _etabsService = new();
+    private readonly Sap2000ModellingService _sap2000Service = new();
+    private readonly List<SteelCatalogSectionRow> _allSteelCatalogSectionRows = [];
+    private bool _hasLoadedSteelCatalog;
     private EtabsInstanceInfo? _selectedEtabsInstance;
+    private Sap2000InstanceInfo? _selectedSap2000Instance;
     private EtabsMaterialPropertyRow? _selectedMaterial;
     private EtabsFramePropertyRow? _selectedFrameProperty;
     private EtabsAreaPropertyRow? _selectedAreaProperty;
     private string _connectionStatus = "Not connected";
-    private string _editorStatus = "Read ETABS properties to begin.";
+    private string _sap2000ConnectionStatus = "Not connected";
+    private string _activeProduct = EtabsProduct;
+    private string _editorStatus = "Read CSI properties to begin.";
     private string _operationStatus = "Ready.";
     private bool _isBusy;
     private string _materialName = "CONC30";
@@ -32,6 +40,7 @@ public sealed class SectionPropertyViewModel : ObservableObject
     private string _selectedSteelCatalogShape = "I";
     private string _selectedSteelDatabaseSection = "";
     private string _importedSteelPropertyName = "";
+    private string _steelCatalogSearchText = "";
     private string _selectedSteelMaterialName = "";
     private SteelCatalogSectionRow? _selectedSteelCatalogSectionRow;
     private string _framePropertyName = "B300X500";
@@ -63,21 +72,24 @@ public sealed class SectionPropertyViewModel : ObservableObject
     {
         RefreshEtabsInstancesCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Refreshing ETABS instances...", RefreshEtabsInstances), _ => !IsBusy);
         ReadEtabsDataCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Reading ETABS section properties...", () => ReadEtabsData(true)), _ => !IsBusy);
+        RefreshSap2000InstancesCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Refreshing SAP2000 instances...", RefreshSap2000Instances), _ => !IsBusy);
+        ReadSap2000DataCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Reading SAP2000 section properties...", ReadSap2000Data), _ => !IsBusy);
         NewMaterialCommand = new RelayCommand(_ => AddNewMaterial());
-        SaveMaterialCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying material property to ETABS...", SaveMaterial), _ => !IsBusy);
-        DeleteMaterialCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Deleting material property from ETABS...", DeleteSelectedMaterial), _ => !IsBusy);
+        SaveMaterialCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying material property to CSI model...", SaveMaterial), _ => !IsBusy);
+        DeleteMaterialCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Deleting material property from CSI model...", DeleteSelectedMaterial), _ => !IsBusy);
         LoadSteelCatalogCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Loading steel database sections...", LoadSteelCatalog), _ => !IsBusy);
-        ImportSteelSectionCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Importing selected steel section to ETABS...", ImportSteelSection), _ => !IsBusy);
+        ImportSteelSectionCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Importing selected steel section to CSI model...", ImportSteelSection), _ => !IsBusy);
         CheckAllSteelCatalogCommand = new RelayCommand(_ => SetSteelCatalogRowsChecked(true));
         UncheckAllSteelCatalogCommand = new RelayCommand(_ => SetSteelCatalogRowsChecked(false));
         TickSelectedSteelCatalogCommand = new RelayCommand(parameter => TickSelectedSteelCatalogRows(parameter));
-        ImportCheckedSteelSectionsCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Importing checked steel sections to ETABS...", ImportCheckedSteelSections), _ => !IsBusy);
+        ImportCheckedSteelSectionsCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Importing checked steel sections to CSI model...", ImportCheckedSteelSections), _ => !IsBusy);
+        ClearSteelCatalogSearchCommand = new RelayCommand(_ => SteelCatalogSearchText = "", _ => !string.IsNullOrWhiteSpace(SteelCatalogSearchText));
         NewFramePropertyCommand = new RelayCommand(_ => AddNewFrameProperty());
-        SaveFramePropertyCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying frame section to ETABS...", SaveFrameProperty), _ => !IsBusy);
-        DeleteFramePropertyCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Deleting frame section from ETABS...", DeleteSelectedFrameProperty), _ => !IsBusy);
+        SaveFramePropertyCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying frame section to CSI model...", SaveFrameProperty), _ => !IsBusy);
+        DeleteFramePropertyCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Deleting frame section from CSI model...", DeleteSelectedFrameProperty), _ => !IsBusy);
         NewAreaPropertyCommand = new RelayCommand(_ => AddNewAreaProperty());
-        SaveAreaPropertyCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying slab/wall property to ETABS...", SaveAreaProperty), _ => !IsBusy);
-        DeleteAreaPropertyCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Deleting slab/wall property from ETABS...", DeleteSelectedAreaProperty), _ => !IsBusy);
+        SaveAreaPropertyCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying slab/wall property to CSI model...", SaveAreaProperty), _ => !IsBusy);
+        DeleteAreaPropertyCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Deleting slab/wall property from CSI model...", DeleteSelectedAreaProperty), _ => !IsBusy);
         LoadTaperedBaseSectionCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Loading tapered steel base section...", LoadTaperedBaseSection), _ => !IsBusy);
         PreviewTaperedSectionCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Previewing tapered steel section...", PreviewTaperedSection), _ => !IsBusy);
         CreateTaperedSectionCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Creating tapered steel section...", CreateTaperedSection), _ => !IsBusy);
@@ -172,6 +184,7 @@ public sealed class SectionPropertyViewModel : ObservableObject
     ];
 
     public ObservableCollection<EtabsInstanceInfo> EtabsInstances { get; } = [];
+    public ObservableCollection<Sap2000InstanceInfo> Sap2000Instances { get; } = [];
     public ObservableCollection<EtabsMaterialPropertyRow> Materials { get; } = [];
     public ObservableCollection<EtabsFramePropertyRow> FrameProperties { get; } = [];
     public ObservableCollection<EtabsAreaPropertyRow> AreaProperties { get; } = [];
@@ -184,6 +197,8 @@ public sealed class SectionPropertyViewModel : ObservableObject
 
     public ICommand RefreshEtabsInstancesCommand { get; }
     public ICommand ReadEtabsDataCommand { get; }
+    public ICommand RefreshSap2000InstancesCommand { get; }
+    public ICommand ReadSap2000DataCommand { get; }
     public ICommand NewMaterialCommand { get; }
     public ICommand SaveMaterialCommand { get; }
     public ICommand DeleteMaterialCommand { get; }
@@ -193,6 +208,7 @@ public sealed class SectionPropertyViewModel : ObservableObject
     public ICommand UncheckAllSteelCatalogCommand { get; }
     public ICommand TickSelectedSteelCatalogCommand { get; }
     public ICommand ImportCheckedSteelSectionsCommand { get; }
+    public ICommand ClearSteelCatalogSearchCommand { get; }
     public ICommand NewFramePropertyCommand { get; }
     public ICommand SaveFramePropertyCommand { get; }
     public ICommand DeleteFramePropertyCommand { get; }
@@ -216,11 +232,37 @@ public sealed class SectionPropertyViewModel : ObservableObject
 
     public string SelectedEtabsInstanceId => SelectedEtabsInstance?.Id ?? "";
 
+    public Sap2000InstanceInfo? SelectedSap2000Instance
+    {
+        get => _selectedSap2000Instance;
+        set
+        {
+            if (SetProperty(ref _selectedSap2000Instance, value))
+                OnPropertyChanged(nameof(SelectedSap2000InstanceId));
+        }
+    }
+
+    public string SelectedSap2000InstanceId => SelectedSap2000Instance?.Id ?? "";
+
     public string ConnectionStatus
     {
         get => _connectionStatus;
         set => SetProperty(ref _connectionStatus, value);
     }
+
+    public string Sap2000ConnectionStatus
+    {
+        get => _sap2000ConnectionStatus;
+        set => SetProperty(ref _sap2000ConnectionStatus, value);
+    }
+
+    public string ActiveProduct
+    {
+        get => _activeProduct;
+        private set => SetProperty(ref _activeProduct, value);
+    }
+
+    private bool IsSap2000Active => string.Equals(ActiveProduct, Sap2000Product, StringComparison.OrdinalIgnoreCase);
 
     public string EditorStatus
     {
@@ -392,13 +434,21 @@ public sealed class SectionPropertyViewModel : ObservableObject
     public string SteelDatabaseFile
     {
         get => _steelDatabaseFile;
-        set => SetProperty(ref _steelDatabaseFile, value ?? "");
+        set
+        {
+            if (SetProperty(ref _steelDatabaseFile, value ?? ""))
+                ReloadSteelCatalogAfterSelectionChange();
+        }
     }
 
     public string SelectedSteelCatalogShape
     {
         get => _selectedSteelCatalogShape;
-        set => SetProperty(ref _selectedSteelCatalogShape, value ?? "I");
+        set
+        {
+            if (SetProperty(ref _selectedSteelCatalogShape, value ?? "I"))
+                ReloadSteelCatalogAfterSelectionChange();
+        }
     }
 
     public string SelectedSteelDatabaseSection
@@ -418,6 +468,29 @@ public sealed class SectionPropertyViewModel : ObservableObject
     {
         get => _importedSteelPropertyName;
         set => SetProperty(ref _importedSteelPropertyName, value ?? "");
+    }
+
+    public string SteelCatalogSearchText
+    {
+        get => _steelCatalogSearchText;
+        set
+        {
+            if (SetProperty(ref _steelCatalogSearchText, value ?? ""))
+                ApplySteelCatalogSearch();
+        }
+    }
+
+    public string SteelCatalogSearchSummary
+    {
+        get
+        {
+            if (_allSteelCatalogSectionRows.Count == 0)
+                return "No steel catalog sections loaded.";
+
+            return string.IsNullOrWhiteSpace(SteelCatalogSearchText)
+                ? $"Showing {SteelCatalogSectionRows.Count} section(s)."
+                : $"Showing {SteelCatalogSectionRows.Count} of {_allSteelCatalogSectionRows.Count} section(s).";
+        }
     }
 
     public string SelectedSteelMaterialName
@@ -711,7 +784,7 @@ public sealed class SectionPropertyViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            ConnectionStatus = "Command failed";
+            SetActiveConnectionStatus("Command failed");
             EditorStatus = ex.Message;
             OperationStatus = $"Failed: {ex.Message}";
             ShowMessages([], ValidationSeverity.Critical, ex.Message);
@@ -726,8 +799,9 @@ public sealed class SectionPropertyViewModel : ObservableObject
 
     private bool IsCurrentStatusFailure()
     {
-        return ConnectionStatus.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
-            ConnectionStatus.Contains("not connected", StringComparison.OrdinalIgnoreCase) ||
+        string activeStatus = IsSap2000Active ? Sap2000ConnectionStatus : ConnectionStatus;
+        return activeStatus.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+            activeStatus.Contains("not connected", StringComparison.OrdinalIgnoreCase) ||
             Messages.Any(message => message.Severity == ValidationSeverity.Critical);
     }
 
@@ -745,8 +819,23 @@ public sealed class SectionPropertyViewModel : ObservableObject
         ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
     }
 
+    private void RefreshSap2000Instances()
+    {
+        Sap2000InstanceListResult result = _sap2000Service.ListSap2000Instances();
+        string previousId = SelectedSap2000InstanceId;
+        ReplaceCollection(Sap2000Instances, result.Instances);
+        SelectedSap2000Instance = Sap2000Instances.FirstOrDefault(instance =>
+            string.Equals(instance.Id, previousId, StringComparison.OrdinalIgnoreCase)) ??
+            Sap2000Instances.FirstOrDefault();
+
+        Sap2000ConnectionStatus = result.Message;
+        EditorStatus = result.Message;
+        ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
+    }
+
     private void ReadEtabsData(bool showMessages)
     {
+        ActiveProduct = EtabsProduct;
         SectionPropertyDataResult result = _etabsService.ListSectionPropertyData(new SectionPropertyDataRequest
         {
             EtabsInstanceId = SelectedEtabsInstanceId
@@ -784,6 +873,40 @@ public sealed class SectionPropertyViewModel : ObservableObject
             ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
     }
 
+    private void ReadSap2000Data()
+    {
+        ActiveProduct = Sap2000Product;
+        SectionPropertyDataResult result = _sap2000Service.ListSectionPropertyData(new SectionPropertyDataRequest
+        {
+            Sap2000InstanceId = SelectedSap2000InstanceId
+        });
+
+        string previousInstanceId = SelectedSap2000InstanceId;
+        string previousMaterial = SelectedFrameMaterialName;
+        string previousAreaMaterial = SelectedAreaMaterialName;
+        string previousSteelMaterial = SelectedSteelMaterialName;
+
+        ReplaceCollection(Sap2000Instances, result.Sap2000Instances);
+        SelectedSap2000Instance = Sap2000Instances.FirstOrDefault(instance =>
+            string.Equals(instance.Id, result.SelectedInstanceId, StringComparison.OrdinalIgnoreCase)) ??
+            Sap2000Instances.FirstOrDefault(instance =>
+                string.Equals(instance.Id, previousInstanceId, StringComparison.OrdinalIgnoreCase)) ??
+            Sap2000Instances.FirstOrDefault();
+
+        ReplaceCollection(Materials, result.Materials);
+        ReplaceCollection(FrameProperties, result.FrameProperties);
+        ReplaceCollection(AreaProperties, result.AreaProperties);
+        ReplaceCollection(MaterialNames, Materials.Select(row => row.Name));
+
+        PickMaterialSelections(previousMaterial, previousAreaMaterial, previousSteelMaterial);
+        SelectedMaterial = Materials.FirstOrDefault(row => string.Equals(row.Name, MaterialName, StringComparison.OrdinalIgnoreCase)) ??
+            Materials.FirstOrDefault();
+
+        Sap2000ConnectionStatus = result.IsError ? "Not connected" : "Connected";
+        EditorStatus = result.Message;
+        ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
+    }
+
     private void AddNewMaterial()
     {
         var row = new EtabsMaterialPropertyRow
@@ -800,16 +923,17 @@ public sealed class SectionPropertyViewModel : ObservableObject
         Materials.Add(row);
         ReplaceCollection(MaterialNames, Materials.Select(material => material.Name));
         SelectedMaterial = row;
-        EditorStatus = "New material row added. Edit the values below, then apply to ETABS.";
+        EditorStatus = "New material row added. Edit the values below, then apply to the active CSI model.";
         OperationStatus = $"Done: {EditorStatus}";
     }
 
     private void SaveMaterial()
     {
         EtabsMaterialPropertyRow? selected = SelectedMaterial;
-        SectionPropertyUpdateResult result = _etabsService.UpdateMaterialProperty(new MaterialPropertyUpdateRequest
+        MaterialPropertyUpdateRequest request = new()
         {
-            EtabsInstanceId = SelectedEtabsInstanceId,
+            EtabsInstanceId = IsSap2000Active ? null : SelectedEtabsInstanceId,
+            Sap2000InstanceId = IsSap2000Active ? SelectedSap2000InstanceId : null,
             Name = selected?.Name ?? MaterialName,
             MaterialType = selected?.MaterialType ?? SelectedMaterialType,
             ElasticModulusMpa = selected?.ElasticModulusMpa ?? ElasticModulusMpa,
@@ -819,7 +943,11 @@ public sealed class SectionPropertyViewModel : ObservableObject
             ConcreteFcMpa = ConcreteFcMpa,
             SteelFyMpa = SteelFyMpa,
             SteelFuMpa = SteelFuMpa
-        });
+        };
+
+        SectionPropertyUpdateResult result = IsSap2000Active
+            ? _sap2000Service.UpdateMaterialProperty(request)
+            : _etabsService.UpdateMaterialProperty(request);
 
         ApplyUpdateResult(result);
     }
@@ -845,31 +973,46 @@ public sealed class SectionPropertyViewModel : ObservableObject
             return;
         }
 
-        SectionPropertyUpdateResult result = _etabsService.DeleteMaterialProperty(new SectionPropertyDeleteRequest
+        SectionPropertyDeleteRequest request = new()
         {
-            EtabsInstanceId = SelectedEtabsInstanceId,
+            EtabsInstanceId = IsSap2000Active ? null : SelectedEtabsInstanceId,
+            Sap2000InstanceId = IsSap2000Active ? SelectedSap2000InstanceId : null,
             Name = SelectedMaterial.Name
-        });
+        };
+
+        SectionPropertyUpdateResult result = IsSap2000Active
+            ? _sap2000Service.DeleteMaterialProperty(request)
+            : _etabsService.DeleteMaterialProperty(request);
 
         ApplyUpdateResult(result);
     }
 
     private void LoadSteelCatalog()
     {
-        SteelSectionCatalogResult result = _etabsService.ListSteelSectionCatalog(new SteelSectionCatalogRequest
+        EnsureActiveModelPropertiesLoadedForSteelCatalog();
+
+        SteelSectionCatalogRequest request = new()
         {
-            EtabsInstanceId = SelectedEtabsInstanceId,
+            EtabsInstanceId = IsSap2000Active ? null : SelectedEtabsInstanceId,
+            Sap2000InstanceId = IsSap2000Active ? SelectedSap2000InstanceId : null,
             DatabaseFile = SteelDatabaseFile,
             ShapeType = SelectedSteelCatalogShape
-        });
+        };
+
+        SteelSectionCatalogResult result = IsSap2000Active
+            ? _sap2000Service.ListSteelSectionCatalog(request)
+            : _etabsService.ListSteelSectionCatalog(request);
 
         ReplaceCollection(SteelCatalogSections, result.SectionNames);
-        ReplaceCollection(SteelCatalogSectionRows, result.SectionNames.Select(name => new SteelCatalogSectionRow
+        _allSteelCatalogSectionRows.Clear();
+        _allSteelCatalogSectionRows.AddRange(result.SectionNames.Select(name => new SteelCatalogSectionRow
         {
             SectionName = name,
             PropertyName = name
         }));
-        SelectedSteelCatalogSectionRow = SteelCatalogSectionRows.FirstOrDefault();
+        _hasLoadedSteelCatalog = true;
+        ApplySteelCatalogSearch();
+
         if (SelectedSteelCatalogSectionRow == null)
         {
             SelectedSteelDatabaseSection = "";
@@ -887,14 +1030,19 @@ public sealed class SectionPropertyViewModel : ObservableObject
         if (string.IsNullOrWhiteSpace(propertyName))
             propertyName = databaseSectionName;
 
-        SectionPropertyUpdateResult result = _etabsService.ImportSteelFrameProperty(new SteelSectionImportRequest
+        SteelSectionImportRequest request = new()
         {
-            EtabsInstanceId = SelectedEtabsInstanceId,
+            EtabsInstanceId = IsSap2000Active ? null : SelectedEtabsInstanceId,
+            Sap2000InstanceId = IsSap2000Active ? SelectedSap2000InstanceId : null,
             PropertyName = propertyName,
             MaterialName = SelectedSteelMaterialName,
             DatabaseFile = SteelDatabaseFile,
             DatabaseSectionName = databaseSectionName
-        });
+        };
+
+        SectionPropertyUpdateResult result = IsSap2000Active
+            ? _sap2000Service.ImportSteelFrameProperty(request)
+            : _etabsService.ImportSteelFrameProperty(request);
 
         if (!result.IsError && !string.IsNullOrWhiteSpace(propertyName))
             SelectedTaperedBaseSectionName = propertyName;
@@ -904,11 +1052,15 @@ public sealed class SectionPropertyViewModel : ObservableObject
 
     private void SetSteelCatalogRowsChecked(bool include)
     {
-        foreach (SteelCatalogSectionRow row in SteelCatalogSectionRows)
+        List<SteelCatalogSectionRow> rows = include
+            ? SteelCatalogSectionRows.ToList()
+            : _allSteelCatalogSectionRows;
+
+        foreach (SteelCatalogSectionRow row in rows)
             row.Include = include;
 
         EditorStatus = include
-            ? $"Checked {SteelCatalogSectionRows.Count} steel catalog section(s)."
+            ? $"Checked {rows.Count} shown steel catalog section(s)."
             : "Unchecked all steel catalog sections.";
         OperationStatus = $"Done: {EditorStatus}";
     }
@@ -933,7 +1085,7 @@ public sealed class SectionPropertyViewModel : ObservableObject
 
     private void ImportCheckedSteelSections()
     {
-        List<SteelCatalogSectionRow> checkedRows = SteelCatalogSectionRows
+        List<SteelCatalogSectionRow> checkedRows = _allSteelCatalogSectionRows
             .Where(row => row.Include)
             .ToList();
 
@@ -963,14 +1115,19 @@ public sealed class SectionPropertyViewModel : ObservableObject
                 continue;
             }
 
-            SectionPropertyUpdateResult result = _etabsService.ImportSteelFrameProperty(new SteelSectionImportRequest
+            SteelSectionImportRequest request = new()
             {
-                EtabsInstanceId = SelectedEtabsInstanceId,
+                EtabsInstanceId = IsSap2000Active ? null : SelectedEtabsInstanceId,
+                Sap2000InstanceId = IsSap2000Active ? SelectedSap2000InstanceId : null,
                 PropertyName = propertyName,
                 MaterialName = SelectedSteelMaterialName,
                 DatabaseFile = SteelDatabaseFile,
                 DatabaseSectionName = databaseSectionName
-            });
+            };
+
+            SectionPropertyUpdateResult result = IsSap2000Active
+                ? _sap2000Service.ImportSteelFrameProperty(request)
+                : _etabsService.ImportSteelFrameProperty(request);
 
             if (result.IsError)
             {
@@ -989,13 +1146,13 @@ public sealed class SectionPropertyViewModel : ObservableObject
         }
 
         if (importedCount > 0)
-            ReadEtabsData(false);
+            ReadActivePropertyData(false);
 
         string summary = failedCount == 0
             ? $"Imported {importedCount} steel frame section(s)."
             : $"Imported {importedCount} of {checkedRows.Count} checked steel frame section(s); {failedCount} failed.";
 
-        ConnectionStatus = failedCount > 0 && importedCount == 0 ? "Update failed" : "Connected";
+        SetActiveConnectionStatus(failedCount > 0 && importedCount == 0 ? "Update failed" : "Connected");
         EditorStatus = summary;
         ShowMessages(messages, failedCount > 0 ? ValidationSeverity.Critical : ValidationSeverity.Info, summary);
     }
@@ -1021,6 +1178,43 @@ public sealed class SectionPropertyViewModel : ObservableObject
             .ToList();
     }
 
+    private void ApplySteelCatalogSearch()
+    {
+        SteelCatalogSectionRow? previousSelection = SelectedSteelCatalogSectionRow;
+        ReplaceCollection(SteelCatalogSectionRows, _allSteelCatalogSectionRows.Where(MatchesSteelCatalogSearch));
+
+        SelectedSteelCatalogSectionRow = previousSelection != null && SteelCatalogSectionRows.Contains(previousSelection)
+            ? previousSelection
+            : SteelCatalogSectionRows.FirstOrDefault();
+
+        if (SelectedSteelCatalogSectionRow == null)
+        {
+            SelectedSteelDatabaseSection = "";
+            ImportedSteelPropertyName = "";
+        }
+
+        OnPropertyChanged(nameof(SteelCatalogSearchSummary));
+        CommandManager.InvalidateRequerySuggested();
+    }
+
+    private bool MatchesSteelCatalogSearch(SteelCatalogSectionRow row)
+    {
+        string searchText = (SteelCatalogSearchText ?? "").Trim();
+        if (searchText.Length == 0)
+            return true;
+
+        string[] terms = searchText.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return terms.All(term =>
+            ContainsSearchText(row.SectionName, term) ||
+            ContainsSearchText(row.PropertyName, term));
+    }
+
+    private static bool ContainsSearchText(string? value, string term)
+    {
+        return !string.IsNullOrWhiteSpace(value) &&
+            value.Contains(term, StringComparison.OrdinalIgnoreCase);
+    }
+
     private void AddNewFrameProperty()
     {
         string materialName = SelectedFrameMaterialName.Length > 0
@@ -1041,16 +1235,17 @@ public sealed class SectionPropertyViewModel : ObservableObject
 
         FrameProperties.Add(row);
         SelectedFrameProperty = row;
-        EditorStatus = "New frame section row added. Edit dimensions in mm below, then apply to ETABS.";
+        EditorStatus = "New frame section row added. Edit dimensions in mm below, then apply to the active CSI model.";
         OperationStatus = $"Done: {EditorStatus}";
     }
 
     private void SaveFrameProperty()
     {
         EtabsFramePropertyRow? selected = SelectedFrameProperty;
-        SectionPropertyUpdateResult result = _etabsService.UpdateFrameProperty(new FramePropertyUpdateRequest
+        FramePropertyUpdateRequest request = new()
         {
-            EtabsInstanceId = SelectedEtabsInstanceId,
+            EtabsInstanceId = IsSap2000Active ? null : SelectedEtabsInstanceId,
+            Sap2000InstanceId = IsSap2000Active ? SelectedSap2000InstanceId : null,
             Name = selected?.Name ?? FramePropertyName,
             ShapeType = selected?.ShapeType ?? SelectedFrameShapeType,
             MaterialName = selected?.MaterialName ?? SelectedFrameMaterialName,
@@ -1059,7 +1254,11 @@ public sealed class SectionPropertyViewModel : ObservableObject
             Width = MmToM(selected?.WidthMm ?? FrameWidthMm),
             FlangeThickness = MmToM(selected?.FlangeThicknessMm ?? FlangeThicknessMm),
             WebThickness = MmToM(selected?.WebThicknessMm ?? WebThicknessMm)
-        });
+        };
+
+        SectionPropertyUpdateResult result = IsSap2000Active
+            ? _sap2000Service.UpdateFrameProperty(request)
+            : _etabsService.UpdateFrameProperty(request);
 
         ApplyUpdateResult(result);
     }
@@ -1084,11 +1283,16 @@ public sealed class SectionPropertyViewModel : ObservableObject
             return;
         }
 
-        SectionPropertyUpdateResult result = _etabsService.DeleteFrameProperty(new SectionPropertyDeleteRequest
+        SectionPropertyDeleteRequest request = new()
         {
-            EtabsInstanceId = SelectedEtabsInstanceId,
+            EtabsInstanceId = IsSap2000Active ? null : SelectedEtabsInstanceId,
+            Sap2000InstanceId = IsSap2000Active ? SelectedSap2000InstanceId : null,
             Name = SelectedFrameProperty.Name
-        });
+        };
+
+        SectionPropertyUpdateResult result = IsSap2000Active
+            ? _sap2000Service.DeleteFrameProperty(request)
+            : _etabsService.DeleteFrameProperty(request);
 
         ApplyUpdateResult(result);
     }
@@ -1110,23 +1314,28 @@ public sealed class SectionPropertyViewModel : ObservableObject
 
         AreaProperties.Add(row);
         SelectedAreaProperty = row;
-        EditorStatus = "New slab/wall row added. Edit thickness in mm below, then apply to ETABS.";
+        EditorStatus = "New slab/wall row added. Edit thickness in mm below, then apply to the active CSI model.";
         OperationStatus = $"Done: {EditorStatus}";
     }
 
     private void SaveAreaProperty()
     {
         EtabsAreaPropertyRow? selected = SelectedAreaProperty;
-        SectionPropertyUpdateResult result = _etabsService.UpdateAreaProperty(new AreaPropertyUpdateRequest
+        AreaPropertyUpdateRequest request = new()
         {
-            EtabsInstanceId = SelectedEtabsInstanceId,
+            EtabsInstanceId = IsSap2000Active ? null : SelectedEtabsInstanceId,
+            Sap2000InstanceId = IsSap2000Active ? SelectedSap2000InstanceId : null,
             Name = selected?.Name ?? AreaPropertyName,
             AreaType = selected?.AreaType ?? SelectedAreaType,
             SlabType = SelectedSlabType,
             ShellType = selected?.ShellType ?? SelectedShellType,
             MaterialName = selected?.MaterialName ?? SelectedAreaMaterialName,
             Thickness = selected?.Thickness ?? MmToM(AreaThicknessMm)
-        });
+        };
+
+        SectionPropertyUpdateResult result = IsSap2000Active
+            ? _sap2000Service.UpdateAreaProperty(request)
+            : _etabsService.UpdateAreaProperty(request);
 
         ApplyUpdateResult(result);
     }
@@ -1151,17 +1360,28 @@ public sealed class SectionPropertyViewModel : ObservableObject
             return;
         }
 
-        SectionPropertyUpdateResult result = _etabsService.DeleteAreaProperty(new SectionPropertyDeleteRequest
+        SectionPropertyDeleteRequest request = new()
         {
-            EtabsInstanceId = SelectedEtabsInstanceId,
+            EtabsInstanceId = IsSap2000Active ? null : SelectedEtabsInstanceId,
+            Sap2000InstanceId = IsSap2000Active ? SelectedSap2000InstanceId : null,
             Name = SelectedAreaProperty.Name
-        });
+        };
+
+        SectionPropertyUpdateResult result = IsSap2000Active
+            ? _sap2000Service.DeleteAreaProperty(request)
+            : _etabsService.DeleteAreaProperty(request);
 
         ApplyUpdateResult(result);
     }
 
     private void LoadTaperedBaseSection()
     {
+        if (IsSap2000Active)
+        {
+            ShowTaperedEtabsOnlyMessage("Load an ETABS property set before using tapered steel tools.");
+            return;
+        }
+
         TaperedSteelSelectionResult result = _etabsService.ReadTaperedSteelBaseSection(new TaperedSteelBaseSectionRequest
         {
             EtabsInstanceId = SelectedEtabsInstanceId,
@@ -1208,12 +1428,24 @@ public sealed class SectionPropertyViewModel : ObservableObject
 
     private void PreviewTaperedSection()
     {
+        if (IsSap2000Active)
+        {
+            ShowTaperedEtabsOnlyMessage("Tapered steel preview is currently ETABS-only.");
+            return;
+        }
+
         TaperedSteelApplyResult result = _etabsService.PreviewTaperedSteelSection(BuildTaperedSteelApplyRequest());
         ApplyTaperedSteelResult(result, assignResult: false);
     }
 
     private void CreateTaperedSection()
     {
+        if (IsSap2000Active)
+        {
+            ShowTaperedEtabsOnlyMessage("Tapered steel creation is currently ETABS-only.");
+            return;
+        }
+
         TaperedSteelApplyResult result = _etabsService.CreateTaperedSteelSection(BuildTaperedSteelApplyRequest());
         ApplyTaperedSteelResult(result, assignResult: false);
 
@@ -1223,8 +1455,21 @@ public sealed class SectionPropertyViewModel : ObservableObject
 
     private void AssignTaperedSection()
     {
+        if (IsSap2000Active)
+        {
+            ShowTaperedEtabsOnlyMessage("Tapered steel assignment is currently ETABS-only.");
+            return;
+        }
+
         TaperedSteelApplyResult result = _etabsService.AssignTaperedSteelSectionToSelectedFrames(BuildTaperedSteelApplyRequest());
         ApplyTaperedSteelResult(result, assignResult: true);
+    }
+
+    private void ShowTaperedEtabsOnlyMessage(string message)
+    {
+        EditorStatus = message;
+        OperationStatus = $"Failed: {message}";
+        ShowMessages([], ValidationSeverity.Critical, message);
     }
 
     private TaperedSteelApplyRequest BuildTaperedSteelApplyRequest()
@@ -1324,11 +1569,43 @@ public sealed class SectionPropertyViewModel : ObservableObject
     private void ApplyUpdateResult(SectionPropertyUpdateResult result)
     {
         if (!result.IsError)
-            ReadEtabsData(false);
+            ReadActivePropertyData(false);
 
-        ConnectionStatus = result.IsError ? "Update failed" : "Connected";
+        SetActiveConnectionStatus(result.IsError ? "Update failed" : "Connected");
         EditorStatus = result.Message;
         ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
+    }
+
+    private async void ReloadSteelCatalogAfterSelectionChange()
+    {
+        if (!_hasLoadedSteelCatalog || IsBusy)
+            return;
+
+        await RunBusyCommandAsync("Loading steel database sections...", LoadSteelCatalog);
+    }
+
+    private void EnsureActiveModelPropertiesLoadedForSteelCatalog()
+    {
+        if (MaterialNames.Count > 0 && !string.IsNullOrWhiteSpace(SelectedSteelMaterialName))
+            return;
+
+        ReadActivePropertyData(false);
+    }
+
+    private void ReadActivePropertyData(bool showMessages)
+    {
+        if (IsSap2000Active)
+            ReadSap2000Data();
+        else
+            ReadEtabsData(showMessages);
+    }
+
+    private void SetActiveConnectionStatus(string status)
+    {
+        if (IsSap2000Active)
+            Sap2000ConnectionStatus = status;
+        else
+            ConnectionStatus = status;
     }
 
     private void PickMaterialSelections(string previousMaterial, string previousAreaMaterial, string previousSteelMaterial)

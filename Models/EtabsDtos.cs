@@ -165,6 +165,7 @@ public sealed class EtabsFrameSelectionResult
 public sealed class EtabsFrameSectionImportRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public bool UseSelectedFrames { get; set; } = true;
     public string GroupName { get; set; } = "";
 }
@@ -310,6 +311,7 @@ public sealed class EtabsFrameSectionRow : INotifyPropertyChanged
 public sealed class EtabsFrameSectionUpdateRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public List<EtabsFrameSectionRow> Frames { get; set; } = [];
 }
 
@@ -327,6 +329,7 @@ public sealed class EtabsFrameSectionUpdateResult
 public sealed class EtabsFrameLoadUpdateRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public List<EtabsFrameSectionRow> Frames { get; set; } = [];
     public string LoadPattern { get; set; } = "";
     public double LineLoadKnPerM { get; set; }
@@ -345,6 +348,7 @@ public sealed class EtabsFrameLoadUpdateResult
 public sealed class EtabsFrameGroupAssignRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public string GroupName { get; set; } = "";
 }
 
@@ -362,6 +366,7 @@ public sealed class EtabsFrameGroupAssignResult
 public sealed class EtabsFrameGroupSectionUpdateRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public string GroupName { get; set; } = "";
     public string SectionName { get; set; } = "";
 }

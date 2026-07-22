@@ -7,7 +7,7 @@ using CSIModellingTools.Models;
 
 namespace CSIModellingTools.Services;
 
-public sealed class Sap2000ModellingService
+public sealed partial class Sap2000ModellingService
 {
     private const string Sap2000ApiObjectProgId = "CSI.SAP2000.API.SapObject";
     private const SAP2000v1.eUnits Sap2000UnitsKnMC = SAP2000v1.eUnits.kN_m_C;
@@ -85,6 +85,7 @@ public sealed class Sap2000ModellingService
         try
         {
             SAP2000v1.cSapModel sapModel = GetRequiredSapModelObject(GetSap2000Object(selectedInstanceId));
+            result.Materials = GetMaterialNames(sapModel, warnings);
             result.FrameSections = GetFrameSectionNames(sapModel, warnings);
             result.CableSections = GetCableSectionNames(sapModel, warnings);
             result.TendonSections = GetTendonSectionNames(sapModel, warnings);
@@ -95,7 +96,7 @@ public sealed class Sap2000ModellingService
                 .ToList();
             result.LoadPatterns = GetLoadPatternNames(sapModel, warnings);
             result.Groups = GetGroupNames(sapModel, warnings);
-            result.Message = $"Loaded {result.FrameSections.Count} SAP2000 frame section(s), {result.CableSections.Count} cable section(s), {result.TendonSections.Count} tendon section(s), and {result.LoadPatterns.Count} load pattern(s).";
+            result.Message = $"Loaded {result.Materials.Count} SAP2000 material(s), {result.FrameSections.Count} frame section(s), {result.CableSections.Count} cable section(s), {result.TendonSections.Count} tendon section(s), and {result.LoadPatterns.Count} load pattern(s).";
         }
         catch (Exception ex)
         {
@@ -1836,6 +1837,37 @@ public sealed class Sap2000ModellingService
 
         if (names.Count == 0)
             warnings.Add("SAP2000 frame section list could not be loaded or the connected model has no frame sections.");
+
+        return names.ToList();
+    }
+
+    private static List<string> GetMaterialNames(SAP2000v1.cSapModel sapModel, List<string> warnings)
+    {
+        var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (SAP2000v1.eMatType materialType in Enum.GetValues(typeof(SAP2000v1.eMatType)).Cast<SAP2000v1.eMatType>())
+        {
+            int numberNames = 0;
+            string[] materialNames = [];
+            try
+            {
+                if (sapModel.PropMaterial.GetNameList(ref numberNames, ref materialNames, materialType) == 0)
+                {
+                    foreach (string name in materialNames.Take(Math.Min(numberNames, materialNames.Length)))
+                    {
+                        if (!string.IsNullOrWhiteSpace(name))
+                            names.Add(name.Trim());
+                    }
+                }
+            }
+            catch
+            {
+                // Missing material families are expected in many SAP2000 models.
+            }
+        }
+
+        if (names.Count == 0)
+            warnings.Add("SAP2000 material list could not be loaded or the connected model has no materials.");
 
         return names.ToList();
     }

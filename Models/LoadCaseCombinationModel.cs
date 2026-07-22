@@ -18,6 +18,7 @@ public enum EditableRowStatus
 public sealed class LoadCaseCombinationDataRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
 }
 
 public sealed class LoadCaseCombinationDataResult
@@ -25,6 +26,7 @@ public sealed class LoadCaseCombinationDataResult
     public bool IsError { get; set; }
     public string Message { get; set; } = "";
     public List<EtabsInstanceInfo> Instances { get; set; } = [];
+    public List<Sap2000InstanceInfo> Sap2000Instances { get; set; } = [];
     public string SelectedInstanceId { get; set; } = "";
     public List<EtabsLoadPatternRow> LoadPatterns { get; set; } = [];
     public List<EtabsLoadCaseRow> LoadCases { get; set; } = [];
@@ -35,6 +37,7 @@ public sealed class LoadCaseCombinationDataResult
 public sealed class LoadPatternUpdateRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public string Name { get; set; } = "";
     public string PatternType { get; set; } = "Dead";
     public double SelfWeightMultiplier { get; set; }
@@ -43,6 +46,7 @@ public sealed class LoadPatternUpdateRequest
 public sealed class StaticLoadCaseUpdateRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public string Name { get; set; } = "";
     public string LoadPatternName { get; set; } = "";
     public double ScaleFactor { get; set; } = 1.0;
@@ -52,6 +56,7 @@ public sealed class StaticLoadCaseUpdateRequest
 public sealed class LoadCombinationUpdateRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public string Name { get; set; } = "";
     public string ComboType { get; set; } = "Linear Additive";
     public List<EtabsComboItemRow> Items { get; set; } = [];
@@ -60,6 +65,7 @@ public sealed class LoadCombinationUpdateRequest
 public sealed class LoadCaseCombinationDeleteRequest
 {
     public string? EtabsInstanceId { get; set; }
+    public string? Sap2000InstanceId { get; set; }
     public string Name { get; set; } = "";
 }
 

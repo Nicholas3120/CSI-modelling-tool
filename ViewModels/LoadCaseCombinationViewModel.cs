@@ -14,10 +14,14 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
     private const string ComboMatrixStatusColumn = "Status";
     private const string ComboMatrixNameColumn = "LoadCombo";
     private const string ComboMatrixTypeColumn = "Type";
+    private const string EtabsProduct = "ETABS";
+    private const string Sap2000Product = "SAP2000";
 
     private readonly EtabsParametricModellingService _etabsService = new();
+    private readonly Sap2000ModellingService _sap2000Service = new();
     private readonly Dictionary<string, string> _comboMatrixLoadCaseNamesByColumn = new(StringComparer.OrdinalIgnoreCase);
     private EtabsInstanceInfo? _selectedEtabsInstance;
+    private Sap2000InstanceInfo? _selectedSap2000Instance;
     private EtabsLoadPatternRow? _selectedLoadPattern;
     private EtabsLoadCaseRow? _selectedLoadCase;
     private EtabsLoadCombinationRow? _selectedLoadCombination;
@@ -29,6 +33,8 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
     private bool _syncingCombinationMatrixSelection;
     private bool _updatingCombinationMatrix;
     private string _connectionStatus = "Not connected";
+    private string _sap2000ConnectionStatus = "Not connected";
+    private string _activeProduct = EtabsProduct;
     private string _editorStatus = "Read ETABS data to begin.";
     private string _operationStatus = "Ready.";
     private bool _isBusy;
@@ -48,18 +54,20 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
     {
         RefreshEtabsInstancesCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Refreshing ETABS instances...", RefreshEtabsInstances), _ => !IsBusy);
         ReadEtabsDataCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Reading ETABS load data...", () => ReadEtabsData(true)), _ => !IsBusy);
-        RevertLoadDataCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Re-reading ETABS load data...", () => ReadEtabsData(true)), _ => !IsBusy);
-        ApplyAllChangesCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying all load changes to ETABS...", ApplyAllChanges), _ => !IsBusy);
-        DeleteMarkedRowsCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Deleting marked load rows from ETABS...", DeleteMarkedRows), _ => !IsBusy);
+        RefreshSap2000InstancesCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Refreshing SAP2000 instances...", RefreshSap2000Instances), _ => !IsBusy);
+        ReadSap2000DataCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Reading SAP2000 load data...", ReadSap2000Data), _ => !IsBusy);
+        RevertLoadDataCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Re-reading CSI load data...", ReadActiveProductData), _ => !IsBusy);
+        ApplyAllChangesCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying all load changes to CSI model...", ApplyAllChanges), _ => !IsBusy);
+        DeleteMarkedRowsCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Deleting marked load rows from CSI model...", DeleteMarkedRows), _ => !IsBusy);
 
         NewLoadPatternCommand = new RelayCommand(_ => AddNewLoadPattern());
         DuplicateLoadPatternCommand = new RelayCommand(_ => DuplicateLoadPattern());
-        SaveLoadPatternCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying selected load pattern to ETABS...", ApplySelectedPattern), _ => !IsBusy);
+        SaveLoadPatternCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying selected load pattern to CSI model...", ApplySelectedPattern), _ => !IsBusy);
         DeleteLoadPatternCommand = new RelayCommand(_ => MarkSelectedPatternDeleted());
 
         NewStaticCaseCommand = new RelayCommand(_ => AddNewStaticCase());
         DuplicateStaticCaseCommand = new RelayCommand(_ => DuplicateStaticCase());
-        SaveStaticCaseCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying selected load case to ETABS...", ApplySelectedCase), _ => !IsBusy);
+        SaveStaticCaseCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying selected load case to CSI model...", ApplySelectedCase), _ => !IsBusy);
         DeleteStaticCaseCommand = new RelayCommand(_ => MarkSelectedCaseDeleted());
         AddCaseItemCommand = new RelayCommand(_ => AddCaseItem());
         RemoveCaseItemCommand = new RelayCommand(parameter => RemoveCaseItem(parameter));
@@ -78,7 +86,7 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
         RemoveTableComboItemCommand = new RelayCommand(parameter => RemoveTableComboItem(parameter as EtabsComboItemRow));
         ClearTableComboItemsCommand = new RelayCommand(parameter => ClearTableComboItems(parameter as EtabsLoadCombinationRow));
         LoadSelectedComboCommand = new RelayCommand(_ => LoadSelectedCombinationToEditor());
-        SaveComboCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying selected load combination to ETABS...", ApplySelectedCombination), _ => !IsBusy);
+        SaveComboCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying selected load combination to CSI model...", ApplySelectedCombination), _ => !IsBusy);
         DeleteComboCommand = new RelayCommand(_ => MarkSelectedCombinationDeleted());
 
         UpdateComboSourceNames();
@@ -102,6 +110,7 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
     ];
 
     public ObservableCollection<EtabsInstanceInfo> EtabsInstances { get; } = [];
+    public ObservableCollection<Sap2000InstanceInfo> Sap2000Instances { get; } = [];
     public ObservableCollection<EtabsLoadPatternRow> LoadPatterns { get; } = [];
     public ObservableCollection<EtabsLoadCaseRow> LoadCases { get; } = [];
     public ObservableCollection<EtabsLoadCombinationRow> LoadCombinations { get; } = [];
@@ -142,6 +151,8 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
 
     public ICommand RefreshEtabsInstancesCommand { get; }
     public ICommand ReadEtabsDataCommand { get; }
+    public ICommand RefreshSap2000InstancesCommand { get; }
+    public ICommand ReadSap2000DataCommand { get; }
     public ICommand RevertLoadDataCommand { get; }
     public ICommand ApplyAllChangesCommand { get; }
     public ICommand DeleteMarkedRowsCommand { get; }
@@ -184,11 +195,37 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
 
     public string SelectedEtabsInstanceId => SelectedEtabsInstance?.Id ?? "";
 
+    public Sap2000InstanceInfo? SelectedSap2000Instance
+    {
+        get => _selectedSap2000Instance;
+        set
+        {
+            if (SetProperty(ref _selectedSap2000Instance, value))
+                OnPropertyChanged(nameof(SelectedSap2000InstanceId));
+        }
+    }
+
+    public string SelectedSap2000InstanceId => SelectedSap2000Instance?.Id ?? "";
+
     public string ConnectionStatus
     {
         get => _connectionStatus;
         set => SetProperty(ref _connectionStatus, value);
     }
+
+    public string Sap2000ConnectionStatus
+    {
+        get => _sap2000ConnectionStatus;
+        set => SetProperty(ref _sap2000ConnectionStatus, value);
+    }
+
+    public string ActiveProduct
+    {
+        get => _activeProduct;
+        private set => SetProperty(ref _activeProduct, value);
+    }
+
+    private bool IsSap2000Active => string.Equals(ActiveProduct, Sap2000Product, StringComparison.OrdinalIgnoreCase);
 
     public string EditorStatus
     {
@@ -363,7 +400,7 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
         }
         catch (Exception ex)
         {
-            ConnectionStatus = "Command failed";
+            SetActiveConnectionStatus("Command failed");
             EditorStatus = ex.Message;
             OperationStatus = $"Failed: {ex.Message}";
             ShowMessages([], ValidationSeverity.Critical, ex.Message);
@@ -378,8 +415,9 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
 
     private bool IsCurrentStatusFailure()
     {
-        return ConnectionStatus.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
-            ConnectionStatus.Contains("not connected", StringComparison.OrdinalIgnoreCase) ||
+        string activeStatus = IsSap2000Active ? Sap2000ConnectionStatus : ConnectionStatus;
+        return activeStatus.Contains("failed", StringComparison.OrdinalIgnoreCase) ||
+            activeStatus.Contains("not connected", StringComparison.OrdinalIgnoreCase) ||
             Messages.Any(message => message.Severity == ValidationSeverity.Critical);
     }
 
@@ -397,8 +435,23 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
         ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
     }
 
+    private void RefreshSap2000Instances()
+    {
+        Sap2000InstanceListResult result = _sap2000Service.ListSap2000Instances();
+        string previousId = SelectedSap2000InstanceId;
+        ReplaceCollection(Sap2000Instances, result.Instances);
+        SelectedSap2000Instance = Sap2000Instances.FirstOrDefault(instance =>
+            string.Equals(instance.Id, previousId, StringComparison.OrdinalIgnoreCase)) ??
+            Sap2000Instances.FirstOrDefault();
+
+        Sap2000ConnectionStatus = result.Message;
+        EditorStatus = result.Message;
+        ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
+    }
+
     private void ReadEtabsData(bool showMessages)
     {
+        ActiveProduct = EtabsProduct;
         LoadCaseCombinationDataResult result = _etabsService.ListLoadCaseCombinationData(new LoadCaseCombinationDataRequest
         {
             EtabsInstanceId = SelectedEtabsInstanceId
@@ -450,6 +503,64 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
             ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
     }
 
+    private void ReadSap2000Data()
+    {
+        ActiveProduct = Sap2000Product;
+        LoadCaseCombinationDataResult result = _sap2000Service.ListLoadCaseCombinationData(new LoadCaseCombinationDataRequest
+        {
+            Sap2000InstanceId = SelectedSap2000InstanceId
+        });
+
+        string previousInstanceId = SelectedSap2000InstanceId;
+        string previousPattern = SelectedLoadPattern?.Name ?? PatternName;
+        string previousCase = SelectedLoadCase?.Name ?? StaticCaseName;
+        string previousCombination = SelectedLoadCombination?.Name ?? ComboName;
+        string previousComboSourceName = SelectedComboSourceName;
+
+        ReplaceCollection(Sap2000Instances, result.Sap2000Instances);
+        SelectedSap2000Instance = Sap2000Instances.FirstOrDefault(instance =>
+            string.Equals(instance.Id, result.SelectedInstanceId, StringComparison.OrdinalIgnoreCase)) ??
+            Sap2000Instances.FirstOrDefault(instance =>
+                string.Equals(instance.Id, previousInstanceId, StringComparison.OrdinalIgnoreCase)) ??
+            Sap2000Instances.FirstOrDefault();
+
+        ReplaceCollection(LoadPatterns, result.LoadPatterns);
+        ReplaceCollection(LoadCases, result.LoadCases);
+        ReplaceCollection(LoadCombinations, result.LoadCombinations);
+        SubscribeTableRows();
+        RefreshNameCollections();
+        UpdatePatternUsage();
+
+        SelectedLoadPattern = LoadPatterns.FirstOrDefault(row =>
+            string.Equals(row.Name, previousPattern, StringComparison.OrdinalIgnoreCase)) ??
+            LoadPatterns.FirstOrDefault();
+        SelectedLoadCase = LoadCases.FirstOrDefault(row =>
+            string.Equals(row.Name, previousCase, StringComparison.OrdinalIgnoreCase)) ??
+            LoadCases.FirstOrDefault();
+        SelectedLoadCombination = LoadCombinations.FirstOrDefault(row =>
+            string.Equals(row.Name, previousCombination, StringComparison.OrdinalIgnoreCase)) ??
+            LoadCombinations.FirstOrDefault();
+        SelectedCaseLoadPattern = LoadPatternNames.FirstOrDefault() ?? "";
+
+        UpdateComboSourceNames();
+        SelectedComboSourceName = ComboSourceNames.FirstOrDefault(name =>
+            string.Equals(name, previousComboSourceName, StringComparison.OrdinalIgnoreCase)) ??
+            ComboSourceNames.FirstOrDefault() ??
+            "";
+
+        Sap2000ConnectionStatus = result.IsError ? "Not connected" : "Connected";
+        EditorStatus = result.Message;
+        ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
+    }
+
+    private void ReadActiveProductData()
+    {
+        if (IsSap2000Active)
+            ReadSap2000Data();
+        else
+            ReadEtabsData(true);
+    }
+
     private void AddNewLoadPattern()
     {
         var row = new EtabsLoadPatternRow
@@ -463,7 +574,7 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
         LoadPatterns.Add(row);
         SelectedLoadPattern = row;
         RefreshNameCollections();
-        EditorStatus = "New load pattern added. Apply selected or apply all changes to update ETABS.";
+        EditorStatus = "New load pattern added. Apply selected or apply all changes to update the active CSI model.";
         OperationStatus = $"Done: {EditorStatus}";
     }
 
@@ -527,7 +638,7 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
         LoadCases.Add(row);
         SelectedLoadCase = row;
         RefreshNameCollections();
-        EditorStatus = "New load case added. Edit its loads, then apply selected or apply all changes to update ETABS.";
+        EditorStatus = "New load case added. Edit its loads, then apply selected or apply all changes to update the active CSI model.";
         OperationStatus = $"Done: {EditorStatus}";
     }
 
@@ -657,7 +768,7 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
         LoadCombinations.Add(row);
         SelectedLoadCombination = row;
         RefreshNameCollections();
-        EditorStatus = "New load combination added. Edit its factors, then apply selected or apply all changes to update ETABS.";
+        EditorStatus = "New load combination added. Edit its factors, then apply selected or apply all changes to update the active CSI model.";
         OperationStatus = $"Done: {EditorStatus}";
     }
 
@@ -870,9 +981,9 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
         foreach (EtabsLoadCombinationRow row in LoadCombinations.Where(row => row.Status is EditableRowStatus.New or EditableRowStatus.Edited or EditableRowStatus.Error).ToList())
             ApplyBatchResult(ApplyCombinationRow(row), messages, ref hasError);
 
-        ReadEtabsData(false);
+        RefreshActiveProductAfterApply();
         string summary = messages.Count == 0 ? "No pending changes to apply." : string.Join(" ", messages);
-        ConnectionStatus = hasError ? "Update failed" : "Connected";
+        SetActiveConnectionStatus(hasError ? "Update failed" : "Connected");
         EditorStatus = summary;
         ShowMessages([], hasError ? ValidationSeverity.Critical : ValidationSeverity.Info, summary);
     }
@@ -889,9 +1000,9 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
         foreach (EtabsLoadPatternRow row in LoadPatterns.Where(row => row.Status == EditableRowStatus.Deleted).ToList())
             ApplyBatchResult(ApplyPatternRow(row), messages, ref hasError);
 
-        ReadEtabsData(false);
+        RefreshActiveProductAfterApply();
         string summary = messages.Count == 0 ? "No rows are marked delete." : string.Join(" ", messages);
-        ConnectionStatus = hasError ? "Update failed" : "Connected";
+        SetActiveConnectionStatus(hasError ? "Update failed" : "Connected");
         EditorStatus = summary;
         ShowMessages([], hasError ? ValidationSeverity.Critical : ValidationSeverity.Info, summary);
     }
@@ -900,11 +1011,17 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
     {
         if (row.Status == EditableRowStatus.Deleted)
         {
-            return _etabsService.DeleteLoadPattern(new LoadCaseCombinationDeleteRequest
-            {
-                EtabsInstanceId = SelectedEtabsInstanceId,
-                Name = row.Name
-            });
+            return IsSap2000Active
+                ? _sap2000Service.DeleteLoadPattern(new LoadCaseCombinationDeleteRequest
+                {
+                    Sap2000InstanceId = SelectedSap2000InstanceId,
+                    Name = row.Name
+                })
+                : _etabsService.DeleteLoadPattern(new LoadCaseCombinationDeleteRequest
+                {
+                    EtabsInstanceId = SelectedEtabsInstanceId,
+                    Name = row.Name
+                });
         }
 
         LoadCaseCombinationUpdateResult validation = ValidatePatternRow(row);
@@ -914,24 +1031,38 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
             return validation;
         }
 
-        return _etabsService.UpdateLoadPattern(new LoadPatternUpdateRequest
-        {
-            EtabsInstanceId = SelectedEtabsInstanceId,
-            Name = row.Name,
-            PatternType = row.PatternType,
-            SelfWeightMultiplier = row.SelfWeightMultiplier
-        });
+        return IsSap2000Active
+            ? _sap2000Service.UpdateLoadPattern(new LoadPatternUpdateRequest
+            {
+                Sap2000InstanceId = SelectedSap2000InstanceId,
+                Name = row.Name,
+                PatternType = row.PatternType,
+                SelfWeightMultiplier = row.SelfWeightMultiplier
+            })
+            : _etabsService.UpdateLoadPattern(new LoadPatternUpdateRequest
+            {
+                EtabsInstanceId = SelectedEtabsInstanceId,
+                Name = row.Name,
+                PatternType = row.PatternType,
+                SelfWeightMultiplier = row.SelfWeightMultiplier
+            });
     }
 
     private LoadCaseCombinationUpdateResult ApplyCaseRow(EtabsLoadCaseRow row)
     {
         if (row.Status == EditableRowStatus.Deleted)
         {
-            return _etabsService.DeleteLoadCase(new LoadCaseCombinationDeleteRequest
-            {
-                EtabsInstanceId = SelectedEtabsInstanceId,
-                Name = row.Name
-            });
+            return IsSap2000Active
+                ? _sap2000Service.DeleteLoadCase(new LoadCaseCombinationDeleteRequest
+                {
+                    Sap2000InstanceId = SelectedSap2000InstanceId,
+                    Name = row.Name
+                })
+                : _etabsService.DeleteLoadCase(new LoadCaseCombinationDeleteRequest
+                {
+                    EtabsInstanceId = SelectedEtabsInstanceId,
+                    Name = row.Name
+                });
         }
 
         LoadCaseCombinationUpdateResult validation = ValidateCaseRow(row);
@@ -941,23 +1072,36 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
             return validation;
         }
 
-        return _etabsService.UpdateStaticLoadCase(new StaticLoadCaseUpdateRequest
-        {
-            EtabsInstanceId = SelectedEtabsInstanceId,
-            Name = row.Name,
-            Items = row.Items.Select(item => item.Clone()).ToList()
-        });
+        return IsSap2000Active
+            ? _sap2000Service.UpdateStaticLoadCase(new StaticLoadCaseUpdateRequest
+            {
+                Sap2000InstanceId = SelectedSap2000InstanceId,
+                Name = row.Name,
+                Items = row.Items.Select(item => item.Clone()).ToList()
+            })
+            : _etabsService.UpdateStaticLoadCase(new StaticLoadCaseUpdateRequest
+            {
+                EtabsInstanceId = SelectedEtabsInstanceId,
+                Name = row.Name,
+                Items = row.Items.Select(item => item.Clone()).ToList()
+            });
     }
 
     private LoadCaseCombinationUpdateResult ApplyCombinationRow(EtabsLoadCombinationRow row)
     {
         if (row.Status == EditableRowStatus.Deleted)
         {
-            return _etabsService.DeleteLoadCombination(new LoadCaseCombinationDeleteRequest
-            {
-                EtabsInstanceId = SelectedEtabsInstanceId,
-                Name = row.Name
-            });
+            return IsSap2000Active
+                ? _sap2000Service.DeleteLoadCombination(new LoadCaseCombinationDeleteRequest
+                {
+                    Sap2000InstanceId = SelectedSap2000InstanceId,
+                    Name = row.Name
+                })
+                : _etabsService.DeleteLoadCombination(new LoadCaseCombinationDeleteRequest
+                {
+                    EtabsInstanceId = SelectedEtabsInstanceId,
+                    Name = row.Name
+                });
         }
 
         LoadCaseCombinationUpdateResult validation = ValidateCombinationRow(row);
@@ -967,13 +1111,21 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
             return validation;
         }
 
-        return _etabsService.UpdateLoadCombination(new LoadCombinationUpdateRequest
-        {
-            EtabsInstanceId = SelectedEtabsInstanceId,
-            Name = row.Name,
-            ComboType = row.ComboType,
-            Items = row.Items.Select(item => item.Clone()).ToList()
-        });
+        return IsSap2000Active
+            ? _sap2000Service.UpdateLoadCombination(new LoadCombinationUpdateRequest
+            {
+                Sap2000InstanceId = SelectedSap2000InstanceId,
+                Name = row.Name,
+                ComboType = row.ComboType,
+                Items = row.Items.Select(item => item.Clone()).ToList()
+            })
+            : _etabsService.UpdateLoadCombination(new LoadCombinationUpdateRequest
+            {
+                EtabsInstanceId = SelectedEtabsInstanceId,
+                Name = row.Name,
+                ComboType = row.ComboType,
+                Items = row.Items.Select(item => item.Clone()).ToList()
+            });
     }
 
     private LoadCaseCombinationUpdateResult ValidatePatternRow(EtabsLoadPatternRow row)
@@ -1060,11 +1212,27 @@ public sealed class LoadCaseCombinationViewModel : ObservableObject
     private void FinishSingleApply(LoadCaseCombinationUpdateResult result)
     {
         if (!result.IsError)
-            ReadEtabsData(false);
+            RefreshActiveProductAfterApply();
 
-        ConnectionStatus = result.IsError ? "Update failed" : "Connected";
+        SetActiveConnectionStatus(result.IsError ? "Update failed" : "Connected");
         EditorStatus = result.Message;
         ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
+    }
+
+    private void RefreshActiveProductAfterApply()
+    {
+        if (IsSap2000Active)
+            ReadSap2000Data();
+        else
+            ReadEtabsData(false);
+    }
+
+    private void SetActiveConnectionStatus(string status)
+    {
+        if (IsSap2000Active)
+            Sap2000ConnectionStatus = status;
+        else
+            ConnectionStatus = status;
     }
 
     private static void ApplyBatchResult(LoadCaseCombinationUpdateResult result, List<string> messages, ref bool hasError)

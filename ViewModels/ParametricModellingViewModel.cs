@@ -17,15 +17,20 @@ public sealed class ParametricModellingViewModel : ObservableObject
     private const string AreaLoadInputLabel = "Area load (kPa)";
     private const string PanelNodesApplicationLabel = "Panel nodes";
     private const string MemberLineApplicationLabel = "Line load";
+    private const string EtabsProduct = "ETABS";
+    private const string Sap2000Product = "SAP2000";
 
     private readonly EtabsParametricModellingService _etabsService = new();
+    private readonly Sap2000ModellingService _sap2000Service = new();
     private readonly ParametricTrussGenerator _generator = new();
     private readonly ParametricTrussValidator _validator = new();
     private bool _etabsDataLoaded;
     private bool _syncingTrussParameterEditor;
     private int _trussParameterCounter = 1;
     private EtabsInstanceInfo? _selectedEtabsInstance;
+    private Sap2000InstanceInfo? _selectedSap2000Instance;
     private string _connectionStatus = "Not connected";
+    private string _sap2000ConnectionStatus = "Not connected";
     private string _trussId = "TR01";
     private string _groupName = "WPF_TRUSS_TR01";
     private string _selectedTrussType = TrussType.Warren.ToString();
@@ -145,7 +150,8 @@ public sealed class ParametricModellingViewModel : ObservableObject
     private bool _sectionEditorAssignToNewGroup;
     private string _sectionEditorNewGroupName = "";
     private string _sectionEditorBulkSection = "";
-    private string _sectionEditorStatus = "No ETABS frames imported";
+    private string _sectionEditorProduct = EtabsProduct;
+    private string _sectionEditorStatus = "No CSI frames imported";
     private string _sectionEditorLoadPattern = "";
     private string _sectionEditorLoadInputType = LineLoadInputLabel;
     private double _sectionEditorLoadMagnitude = 5.0;
@@ -166,10 +172,13 @@ public sealed class ParametricModellingViewModel : ObservableObject
         WallDrain = new WallDrainViewModel();
         LoadCaseCombination = new LoadCaseCombinationViewModel();
         SectionProperty = new SectionPropertyViewModel();
+        ModelMigration = new ModelMigrationViewModel();
         ModelCompare = new ModelCompareViewModel();
         IfcStructuralImport = new IfcStructuralImportViewModel();
         RefreshEtabsInstancesCommand = new RelayCommand(_ => RefreshEtabsInstances());
         ReadEtabsDataCommand = new RelayCommand(_ => ReadEtabsData());
+        RefreshSap2000InstancesCommand = new RelayCommand(_ => RefreshSap2000Instances());
+        ReadSap2000DataCommand = new RelayCommand(_ => ReadSap2000Data());
         ReadSelectedPointsCommand = new RelayCommand(_ => ReadSelectedPoints());
         ValidateCommand = new RelayCommand(_ => ValidateCurrentModel(true));
         SendToEtabsCommand = new RelayCommand(_ => SendToEtabs());
@@ -210,6 +219,7 @@ public sealed class ParametricModellingViewModel : ObservableObject
     public WallDrainViewModel WallDrain { get; }
     public LoadCaseCombinationViewModel LoadCaseCombination { get; }
     public SectionPropertyViewModel SectionProperty { get; }
+    public ModelMigrationViewModel ModelMigration { get; }
     public ModelCompareViewModel ModelCompare { get; }
     public IfcStructuralImportViewModel IfcStructuralImport { get; }
 
@@ -359,6 +369,7 @@ public sealed class ParametricModellingViewModel : ObservableObject
         MemberLineApplicationLabel
     ];
     public ObservableCollection<EtabsInstanceInfo> EtabsInstances { get; } = [];
+    public ObservableCollection<Sap2000InstanceInfo> Sap2000Instances { get; } = [];
     public ObservableCollection<string> FrameSections { get; } = [];
     public ObservableCollection<string> ShellProperties { get; } = [];
     public ObservableCollection<string> LoadPatterns { get; } = [];
@@ -381,6 +392,8 @@ public sealed class ParametricModellingViewModel : ObservableObject
 
     public ICommand RefreshEtabsInstancesCommand { get; }
     public ICommand ReadEtabsDataCommand { get; }
+    public ICommand RefreshSap2000InstancesCommand { get; }
+    public ICommand ReadSap2000DataCommand { get; }
     public ICommand ReadSelectedPointsCommand { get; }
     public ICommand ValidateCommand { get; }
     public ICommand SendToEtabsCommand { get; }
@@ -417,11 +430,37 @@ public sealed class ParametricModellingViewModel : ObservableObject
 
     public string SelectedEtabsInstanceId => SelectedEtabsInstance?.Id ?? "";
 
+    public Sap2000InstanceInfo? SelectedSap2000Instance
+    {
+        get => _selectedSap2000Instance;
+        set
+        {
+            if (SetProperty(ref _selectedSap2000Instance, value))
+                OnPropertyChanged(nameof(SelectedSap2000InstanceId));
+        }
+    }
+
+    public string SelectedSap2000InstanceId => SelectedSap2000Instance?.Id ?? "";
+
     public string ConnectionStatus
     {
         get => _connectionStatus;
         set => SetProperty(ref _connectionStatus, value);
     }
+
+    public string Sap2000ConnectionStatus
+    {
+        get => _sap2000ConnectionStatus;
+        set => SetProperty(ref _sap2000ConnectionStatus, value);
+    }
+
+    public string SectionEditorProduct
+    {
+        get => _sectionEditorProduct;
+        private set => SetProperty(ref _sectionEditorProduct, value);
+    }
+
+    private bool IsSectionEditorSap2000Active => string.Equals(SectionEditorProduct, Sap2000Product, StringComparison.OrdinalIgnoreCase);
 
     public string TrussId
     {
@@ -1308,8 +1347,22 @@ public sealed class ParametricModellingViewModel : ObservableObject
         ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
     }
 
+    private void RefreshSap2000Instances()
+    {
+        Sap2000InstanceListResult result = _sap2000Service.ListSap2000Instances();
+        string previousId = SelectedSap2000InstanceId;
+        ReplaceCollection(Sap2000Instances, result.Instances);
+        SelectedSap2000Instance = Sap2000Instances.FirstOrDefault(instance =>
+            string.Equals(instance.Id, previousId, StringComparison.OrdinalIgnoreCase)) ??
+            Sap2000Instances.FirstOrDefault();
+
+        Sap2000ConnectionStatus = result.Message;
+        ShowSectionEditorMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
+    }
+
     private void ReadEtabsData()
     {
+        SectionEditorProduct = EtabsProduct;
         EtabsParametricModelDataResult result = _etabsService.ListParametricModelData(new EtabsParametricModelDataRequest
         {
             EtabsInstanceId = SelectedEtabsInstanceId
@@ -1335,8 +1388,41 @@ public sealed class ParametricModellingViewModel : ObservableObject
         PickDefaultLoadSelections();
         PickDefaultTrussStory();
         ConnectionStatus = result.IsError ? "Not connected" : "Connected";
+        SectionEditorStatus = result.IsError
+            ? "ETABS read failed"
+            : $"Loaded {FrameSections.Count} ETABS frame section(s) and {LoadPatterns.Count} load pattern(s).";
         ShowMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
         RegeneratePreview();
+    }
+
+    private void ReadSap2000Data()
+    {
+        SectionEditorProduct = Sap2000Product;
+        Sap2000ModelDataResult result = _sap2000Service.ListModelData(new Sap2000ModelDataRequest
+        {
+            Sap2000InstanceId = SelectedSap2000InstanceId
+        });
+
+        string previousId = SelectedSap2000InstanceId;
+        ReplaceCollection(Sap2000Instances, result.Instances);
+        SelectedSap2000Instance = Sap2000Instances.FirstOrDefault(instance =>
+            string.Equals(instance.Id, result.SelectedInstanceId, StringComparison.OrdinalIgnoreCase)) ??
+            Sap2000Instances.FirstOrDefault(instance =>
+                string.Equals(instance.Id, previousId, StringComparison.OrdinalIgnoreCase)) ??
+            Sap2000Instances.FirstOrDefault();
+
+        ReplaceCollection(FrameSections, result.FrameSections);
+        ReplaceCollection(LoadPatterns, result.LoadPatterns);
+        ReplaceCollection(Groups, result.Groups);
+        PickDefaultSections();
+        PickDefaultSectionEditorGroup();
+        PickDefaultLoadSelections();
+
+        Sap2000ConnectionStatus = result.IsError ? "Not connected" : "Connected";
+        SectionEditorStatus = result.IsError
+            ? "SAP2000 read failed"
+            : $"Loaded {FrameSections.Count} SAP2000 frame section(s) and {LoadPatterns.Count} load pattern(s).";
+        ShowSectionEditorMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
     }
 
     private void ReadSelectedPoints()
@@ -1507,11 +1593,17 @@ public sealed class ParametricModellingViewModel : ObservableObject
 
     private void ImportEtabsFramesForSectionEditing()
     {
-        EtabsFrameSectionImportResult result = _etabsService.ImportFrameSections(new EtabsFrameSectionImportRequest
-        {
-            EtabsInstanceId = SelectedEtabsInstanceId,
-            UseSelectedFrames = SectionEditorUseSelectedFrames
-        });
+        EtabsFrameSectionImportResult result = IsSectionEditorSap2000Active
+            ? _sap2000Service.ImportFrameSections(new EtabsFrameSectionImportRequest
+            {
+                Sap2000InstanceId = SelectedSap2000InstanceId,
+                UseSelectedFrames = SectionEditorUseSelectedFrames
+            })
+            : _etabsService.ImportFrameSections(new EtabsFrameSectionImportRequest
+            {
+                EtabsInstanceId = SelectedEtabsInstanceId,
+                UseSelectedFrames = SectionEditorUseSelectedFrames
+            });
 
         ApplySectionEditorImportResult(result);
     }
@@ -1521,17 +1613,24 @@ public sealed class ParametricModellingViewModel : ObservableObject
         string groupName = (SectionEditorGroupName ?? "").Trim();
         if (groupName.Length == 0)
         {
-            ShowSectionEditorMessages([], ValidationSeverity.Critical, "Select or enter an ETABS group before importing group frames.");
+            ShowSectionEditorMessages([], ValidationSeverity.Critical, "Select or enter a CSI group before importing group frames.");
             SectionEditorStatus = "Group import failed";
             return;
         }
 
-        EtabsFrameSectionImportResult result = _etabsService.ImportFrameSections(new EtabsFrameSectionImportRequest
-        {
-            EtabsInstanceId = SelectedEtabsInstanceId,
-            UseSelectedFrames = false,
-            GroupName = groupName
-        });
+        EtabsFrameSectionImportResult result = IsSectionEditorSap2000Active
+            ? _sap2000Service.ImportFrameSections(new EtabsFrameSectionImportRequest
+            {
+                Sap2000InstanceId = SelectedSap2000InstanceId,
+                UseSelectedFrames = false,
+                GroupName = groupName
+            })
+            : _etabsService.ImportFrameSections(new EtabsFrameSectionImportRequest
+            {
+                EtabsInstanceId = SelectedEtabsInstanceId,
+                UseSelectedFrames = false,
+                GroupName = groupName
+            });
 
         ApplySectionEditorImportResult(result);
     }
@@ -1562,18 +1661,24 @@ public sealed class ParametricModellingViewModel : ObservableObject
         if (groupName.Length == 0)
         {
             string message = SectionEditorAssignToNewGroup
-                ? "Enter a new ETABS group name before assigning selected frames."
-                : "Select an existing ETABS group before assigning selected frames.";
+                ? "Enter a new CSI group name before assigning selected frames."
+                : "Select an existing CSI group before assigning selected frames.";
             ShowSectionEditorMessages([], ValidationSeverity.Critical, message);
             SectionEditorStatus = "Group assignment failed";
             return;
         }
 
-        EtabsFrameGroupAssignResult result = _etabsService.AssignSelectedFramesToGroup(new EtabsFrameGroupAssignRequest
-        {
-            EtabsInstanceId = SelectedEtabsInstanceId,
-            GroupName = groupName
-        });
+        EtabsFrameGroupAssignResult result = IsSectionEditorSap2000Active
+            ? _sap2000Service.AssignSelectedFramesToGroup(new EtabsFrameGroupAssignRequest
+            {
+                Sap2000InstanceId = SelectedSap2000InstanceId,
+                GroupName = groupName
+            })
+            : _etabsService.AssignSelectedFramesToGroup(new EtabsFrameGroupAssignRequest
+            {
+                EtabsInstanceId = SelectedEtabsInstanceId,
+                GroupName = groupName
+            });
 
         if (!string.IsNullOrWhiteSpace(result.GroupName))
         {
@@ -1630,11 +1735,17 @@ public sealed class ParametricModellingViewModel : ObservableObject
 
     private void UpdateEtabsFrameSections()
     {
-        EtabsFrameSectionUpdateResult result = _etabsService.UpdateFrameSections(new EtabsFrameSectionUpdateRequest
-        {
-            EtabsInstanceId = SelectedEtabsInstanceId,
-            Frames = SectionEditorFrames.ToList()
-        });
+        EtabsFrameSectionUpdateResult result = IsSectionEditorSap2000Active
+            ? _sap2000Service.UpdateFrameSections(new EtabsFrameSectionUpdateRequest
+            {
+                Sap2000InstanceId = SelectedSap2000InstanceId,
+                Frames = SectionEditorFrames.ToList()
+            })
+            : _etabsService.UpdateFrameSections(new EtabsFrameSectionUpdateRequest
+            {
+                EtabsInstanceId = SelectedEtabsInstanceId,
+                Frames = SectionEditorFrames.ToList()
+            });
 
         ApplySectionUpdateToImportedRows(result, "");
         SectionEditorStatus = result.IsError ? "Update failed" : $"{result.UpdatedCount} frame section(s) updated";
@@ -1659,14 +1770,23 @@ public sealed class ParametricModellingViewModel : ObservableObject
             return;
         }
 
-        EtabsFrameLoadUpdateResult result = _etabsService.UpdateFrameDistributedLoads(new EtabsFrameLoadUpdateRequest
-        {
-            EtabsInstanceId = SelectedEtabsInstanceId,
-            Frames = SectionEditorFrames.ToList(),
-            LoadPattern = loadPattern,
-            LineLoadKnPerM = equivalentLineLoad,
-            ReplaceSelectedPatternLoads = SectionEditorReplaceSelectedPatternLoads
-        });
+        EtabsFrameLoadUpdateResult result = IsSectionEditorSap2000Active
+            ? _sap2000Service.UpdateFrameDistributedLoads(new EtabsFrameLoadUpdateRequest
+            {
+                Sap2000InstanceId = SelectedSap2000InstanceId,
+                Frames = SectionEditorFrames.ToList(),
+                LoadPattern = loadPattern,
+                LineLoadKnPerM = equivalentLineLoad,
+                ReplaceSelectedPatternLoads = SectionEditorReplaceSelectedPatternLoads
+            })
+            : _etabsService.UpdateFrameDistributedLoads(new EtabsFrameLoadUpdateRequest
+            {
+                EtabsInstanceId = SelectedEtabsInstanceId,
+                Frames = SectionEditorFrames.ToList(),
+                LoadPattern = loadPattern,
+                LineLoadKnPerM = equivalentLineLoad,
+                ReplaceSelectedPatternLoads = SectionEditorReplaceSelectedPatternLoads
+            });
 
         SectionEditorStatus = result.IsError ? "Load update failed" : $"{result.UpdatedCount} frame load(s) updated";
         ShowSectionEditorMessages(result.Warnings, result.IsError ? ValidationSeverity.Critical : ValidationSeverity.Info, result.Message);
@@ -1677,7 +1797,7 @@ public sealed class ParametricModellingViewModel : ObservableObject
         string groupName = (SectionEditorGroupName ?? "").Trim();
         if (groupName.Length == 0)
         {
-            ShowSectionEditorMessages([], ValidationSeverity.Critical, "Select an ETABS group before applying a section to the group.");
+            ShowSectionEditorMessages([], ValidationSeverity.Critical, "Select a CSI group before applying a section to the group.");
             SectionEditorStatus = "Group section update failed";
             return;
         }
@@ -1690,12 +1810,19 @@ public sealed class ParametricModellingViewModel : ObservableObject
             return;
         }
 
-        EtabsFrameSectionUpdateResult result = _etabsService.UpdateFrameGroupSection(new EtabsFrameGroupSectionUpdateRequest
-        {
-            EtabsInstanceId = SelectedEtabsInstanceId,
-            GroupName = groupName,
-            SectionName = sectionName
-        });
+        EtabsFrameSectionUpdateResult result = IsSectionEditorSap2000Active
+            ? _sap2000Service.UpdateFrameGroupSection(new EtabsFrameGroupSectionUpdateRequest
+            {
+                Sap2000InstanceId = SelectedSap2000InstanceId,
+                GroupName = groupName,
+                SectionName = sectionName
+            })
+            : _etabsService.UpdateFrameGroupSection(new EtabsFrameGroupSectionUpdateRequest
+            {
+                EtabsInstanceId = SelectedEtabsInstanceId,
+                GroupName = groupName,
+                SectionName = sectionName
+            });
 
         ApplySectionUpdateToImportedRows(result, groupName);
         if (!result.IsError && result.FrameSections.Count > 0)
