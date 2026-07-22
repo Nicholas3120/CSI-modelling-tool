@@ -916,7 +916,7 @@
                     </Grid>
                 </Grid>
             </TabItem>
-            <TabItem Header="City of Tomorrow" DataContext="{Binding CityOfTomorrow}">
+            <TabItem Header="CoT Cable VRF" DataContext="{Binding CityOfTomorrow}">
                 <Grid Margin="12">
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
