@@ -67,6 +67,15 @@ public sealed class SectionPropertyViewModel : ObservableObject
     private int _taperedStationCount = 1;
     private bool _showTaperedStations = true;
     private string _taperedPreviewReport = "No ETABS frame members loaded.";
+    private string _sap2000SdSectionName = "CFT_SHS_1200x2000x150";
+    private string _selectedSap2000SdTemplate = "Rectangular CFT / CFST";
+    private string _selectedSap2000SdDesignType = "No design/check";
+    private string _sap2000SdBaseMaterialName = "";
+    private string _sap2000SdSteelMaterialName = "";
+    private string _sap2000SdConcreteMaterialName = "";
+    private double _sap2000SdDepthMm = 2000;
+    private double _sap2000SdWidthMm = 1200;
+    private double _sap2000SdWallThicknessMm = 150;
 
     public SectionPropertyViewModel()
     {
@@ -87,6 +96,7 @@ public sealed class SectionPropertyViewModel : ObservableObject
         NewFramePropertyCommand = new RelayCommand(_ => AddNewFrameProperty());
         SaveFramePropertyCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying frame section to CSI model...", SaveFrameProperty), _ => !IsBusy);
         DeleteFramePropertyCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Deleting frame section from CSI model...", DeleteSelectedFrameProperty), _ => !IsBusy);
+        CreateSap2000SectionDesignerCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Creating SAP2000 Section Designer section...", CreateSap2000SectionDesignerSection), _ => IsSap2000SectionDesignerEditorEnabled);
         NewAreaPropertyCommand = new RelayCommand(_ => AddNewAreaProperty());
         SaveAreaPropertyCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Applying slab/wall property to CSI model...", SaveAreaProperty), _ => !IsBusy);
         DeleteAreaPropertyCommand = new RelayCommand(async _ => await RunBusyCommandAsync("Deleting slab/wall property from CSI model...", DeleteSelectedAreaProperty), _ => !IsBusy);
@@ -139,6 +149,20 @@ public sealed class SectionPropertyViewModel : ObservableObject
     [
         "Beam / General",
         "Column"
+    ];
+
+    public IReadOnlyList<string> Sap2000SectionDesignerTemplates { get; } =
+    [
+        "Rectangular CFT / CFST",
+        "Circular CFT / CFST"
+    ];
+
+    public IReadOnlyList<string> Sap2000SectionDesignerDesignTypes { get; } =
+    [
+        "No design/check",
+        "General steel design",
+        "Concrete column check reinforcing",
+        "Concrete column design reinforcing"
     ];
 
     public IReadOnlyList<string> AreaTypes { get; } =
@@ -212,6 +236,7 @@ public sealed class SectionPropertyViewModel : ObservableObject
     public ICommand NewFramePropertyCommand { get; }
     public ICommand SaveFramePropertyCommand { get; }
     public ICommand DeleteFramePropertyCommand { get; }
+    public ICommand CreateSap2000SectionDesignerCommand { get; }
     public ICommand NewAreaPropertyCommand { get; }
     public ICommand SaveAreaPropertyCommand { get; }
     public ICommand DeleteAreaPropertyCommand { get; }
@@ -259,10 +284,16 @@ public sealed class SectionPropertyViewModel : ObservableObject
     public string ActiveProduct
     {
         get => _activeProduct;
-        private set => SetProperty(ref _activeProduct, value);
+        private set
+        {
+            if (SetProperty(ref _activeProduct, value ?? EtabsProduct))
+                OnPropertyChanged(nameof(IsSap2000SectionDesignerEditorEnabled));
+        }
     }
 
     private bool IsSap2000Active => string.Equals(ActiveProduct, Sap2000Product, StringComparison.OrdinalIgnoreCase);
+
+    public bool IsSap2000SectionDesignerEditorEnabled => IsSap2000Active && !IsBusy;
 
     public string EditorStatus
     {
@@ -282,7 +313,10 @@ public sealed class SectionPropertyViewModel : ObservableObject
         set
         {
             if (SetProperty(ref _isBusy, value))
+            {
                 OnPropertyChanged(nameof(BusyVisibility));
+                OnPropertyChanged(nameof(IsSap2000SectionDesignerEditorEnabled));
+            }
         }
     }
 
@@ -593,6 +627,84 @@ public sealed class SectionPropertyViewModel : ObservableObject
                 SelectedFrameProperty.WebThicknessMm = _webThicknessMm;
         }
     }
+
+    public string Sap2000SectionDesignerSectionName
+    {
+        get => _sap2000SdSectionName;
+        set => SetProperty(ref _sap2000SdSectionName, value ?? "");
+    }
+
+    public string SelectedSap2000SectionDesignerTemplate
+    {
+        get => _selectedSap2000SdTemplate;
+        set
+        {
+            if (SetProperty(ref _selectedSap2000SdTemplate, value ?? "Rectangular CFT / CFST"))
+            {
+                OnPropertyChanged(nameof(Sap2000SectionDesignerWidthVisibility));
+                OnPropertyChanged(nameof(Sap2000SectionDesignerPrimaryDimensionLabel));
+            }
+        }
+    }
+
+    public string SelectedSap2000SectionDesignerDesignType
+    {
+        get => _selectedSap2000SdDesignType;
+        set => SetProperty(ref _selectedSap2000SdDesignType, value ?? "No design/check");
+    }
+
+    public string Sap2000SectionDesignerBaseMaterialName
+    {
+        get => _sap2000SdBaseMaterialName;
+        set => SetProperty(ref _sap2000SdBaseMaterialName, value ?? "");
+    }
+
+    public string Sap2000SectionDesignerSteelMaterialName
+    {
+        get => _sap2000SdSteelMaterialName;
+        set
+        {
+            if (SetProperty(ref _sap2000SdSteelMaterialName, value ?? "") &&
+                string.IsNullOrWhiteSpace(Sap2000SectionDesignerBaseMaterialName))
+            {
+                Sap2000SectionDesignerBaseMaterialName = _sap2000SdSteelMaterialName;
+            }
+        }
+    }
+
+    public string Sap2000SectionDesignerConcreteMaterialName
+    {
+        get => _sap2000SdConcreteMaterialName;
+        set => SetProperty(ref _sap2000SdConcreteMaterialName, value ?? "");
+    }
+
+    public double Sap2000SectionDesignerDepthMm
+    {
+        get => _sap2000SdDepthMm;
+        set => SetProperty(ref _sap2000SdDepthMm, double.IsFinite(value) ? value : 0.0);
+    }
+
+    public double Sap2000SectionDesignerWidthMm
+    {
+        get => _sap2000SdWidthMm;
+        set => SetProperty(ref _sap2000SdWidthMm, double.IsFinite(value) ? value : 0.0);
+    }
+
+    public double Sap2000SectionDesignerWallThicknessMm
+    {
+        get => _sap2000SdWallThicknessMm;
+        set => SetProperty(ref _sap2000SdWallThicknessMm, double.IsFinite(value) ? value : 0.0);
+    }
+
+    public Visibility Sap2000SectionDesignerWidthVisibility =>
+        IsSap2000SectionDesignerCircularTemplate()
+            ? Visibility.Collapsed
+            : Visibility.Visible;
+
+    public string Sap2000SectionDesignerPrimaryDimensionLabel =>
+        IsSap2000SectionDesignerCircularTemplate()
+            ? "Outer dia mm"
+            : "Outer depth mm";
 
     public Visibility SteelFrameDimensionVisibility =>
         SelectedFrameShapeType.StartsWith("Steel", StringComparison.OrdinalIgnoreCase)
@@ -1263,6 +1375,126 @@ public sealed class SectionPropertyViewModel : ObservableObject
         ApplyUpdateResult(result);
     }
 
+    private void CreateSap2000SectionDesignerSection()
+    {
+        if (!IsSap2000Active)
+        {
+            EditorStatus = "Read SAP2000 properties first before creating a SAP2000 Section Designer section.";
+            OperationStatus = $"Failed: {EditorStatus}";
+            ShowMessages([], ValidationSeverity.Critical, EditorStatus);
+            return;
+        }
+
+        Sap2000SectionDesignerFrameSection section = BuildSap2000CftSectionDesignerSection();
+        SectionPropertyUpdateResult result = _sap2000Service.UpdateSectionDesignerFrameProperty(new Sap2000SectionDesignerFramePropertyUpdateRequest
+        {
+            Sap2000InstanceId = SelectedSap2000InstanceId,
+            Section = section
+        });
+
+        ApplyUpdateResult(result);
+    }
+
+    private Sap2000SectionDesignerFrameSection BuildSap2000CftSectionDesignerSection()
+    {
+        string sectionName = (Sap2000SectionDesignerSectionName ?? "").Trim();
+        string baseMaterialName = (Sap2000SectionDesignerBaseMaterialName ?? "").Trim();
+        string steelMaterialName = (Sap2000SectionDesignerSteelMaterialName ?? "").Trim();
+        string concreteMaterialName = (Sap2000SectionDesignerConcreteMaterialName ?? "").Trim();
+
+        if (sectionName.Length == 0)
+            throw new InvalidOperationException("Section Designer section name is required.");
+        if (steelMaterialName.Length == 0)
+            throw new InvalidOperationException("Select the steel material for the Section Designer tube/pipe shape.");
+        if (concreteMaterialName.Length == 0)
+            throw new InvalidOperationException("Select the concrete material for the Section Designer infill shape.");
+        if (baseMaterialName.Length == 0)
+            baseMaterialName = steelMaterialName;
+
+        double outerDepthOrDiameter = PositiveMmToM(Sap2000SectionDesignerDepthMm, Sap2000SectionDesignerPrimaryDimensionLabel);
+        double wallThickness = PositiveMmToM(Sap2000SectionDesignerWallThicknessMm, "Wall thickness");
+        bool isCircular = IsSap2000SectionDesignerCircularTemplate();
+
+        var section = new Sap2000SectionDesignerFrameSection
+        {
+            Name = sectionName,
+            BaseMaterialName = baseMaterialName,
+            DesignType = ToSap2000SectionDesignerDesignType(SelectedSap2000SectionDesignerDesignType),
+            Color = -1,
+            Notes = "Created from CSI Modelling Tools SAP2000 Section Designer CFT/CFST template.",
+            Guid = ""
+        };
+
+        if (isCircular)
+        {
+            if (outerDepthOrDiameter <= 2.0 * wallThickness)
+                throw new InvalidOperationException("Circular CFT outer diameter must be greater than two times the wall thickness.");
+
+            section.Shapes.Add(new Sap2000SectionDesignerShape
+            {
+                TypeCode = 7,
+                ShapeName = "SteelPipe",
+                MaterialName = steelMaterialName,
+                XCenter = 0,
+                YCenter = 0,
+                Color = -1,
+                Diameter = outerDepthOrDiameter,
+                Thickness = wallThickness
+            });
+
+            section.Shapes.Add(new Sap2000SectionDesignerShape
+            {
+                TypeCode = 102,
+                ShapeName = "ConcreteInfill",
+                MaterialName = concreteMaterialName,
+                StressStrainOverwrite = "",
+                XCenter = 0,
+                YCenter = 0,
+                Diameter = outerDepthOrDiameter - 2.0 * wallThickness,
+                Color = -1,
+                Reinforcement = false
+            });
+
+            return section;
+        }
+
+        double outerWidth = PositiveMmToM(Sap2000SectionDesignerWidthMm, "Outer width");
+        if (outerDepthOrDiameter <= 2.0 * wallThickness || outerWidth <= 2.0 * wallThickness)
+            throw new InvalidOperationException("Rectangular CFT outer depth and width must both be greater than two times the wall thickness.");
+
+        section.Shapes.Add(new Sap2000SectionDesignerShape
+        {
+            TypeCode = 6,
+            ShapeName = "SteelTube",
+            MaterialName = steelMaterialName,
+            XCenter = 0,
+            YCenter = 0,
+            Rotation = 0,
+            Color = -1,
+            Height = outerDepthOrDiameter,
+            Width = outerWidth,
+            FlangeThickness = wallThickness,
+            WebThickness = wallThickness
+        });
+
+        section.Shapes.Add(new Sap2000SectionDesignerShape
+        {
+            TypeCode = 101,
+            ShapeName = "ConcreteInfill",
+            MaterialName = concreteMaterialName,
+            StressStrainOverwrite = "",
+            XCenter = 0,
+            YCenter = 0,
+            Height = outerDepthOrDiameter - 2.0 * wallThickness,
+            Width = outerWidth - 2.0 * wallThickness,
+            Rotation = 0,
+            Color = -1,
+            Reinforcement = false
+        });
+
+        return section;
+    }
+
     private void DeleteSelectedFrameProperty()
     {
         if (SelectedFrameProperty == null)
@@ -1629,6 +1861,19 @@ public sealed class SectionPropertyViewModel : ObservableObject
             SelectedAreaMaterialName = firstMaterial;
         if (SelectedSteelMaterialName.Length == 0)
             SelectedSteelMaterialName = firstMaterial;
+
+        Sap2000SectionDesignerSteelMaterialName = PickMaterialName(Sap2000SectionDesignerSteelMaterialName, firstSteel.Length > 0 ? firstSteel : firstMaterial);
+        Sap2000SectionDesignerConcreteMaterialName = PickMaterialName(Sap2000SectionDesignerConcreteMaterialName, firstConcrete.Length > 0 ? firstConcrete : firstMaterial);
+        Sap2000SectionDesignerBaseMaterialName = PickMaterialName(
+            Sap2000SectionDesignerBaseMaterialName,
+            Sap2000SectionDesignerSteelMaterialName.Length > 0 ? Sap2000SectionDesignerSteelMaterialName : firstMaterial);
+    }
+
+    private string PickMaterialName(string previousName, string fallbackName)
+    {
+        return MaterialNames.FirstOrDefault(name => string.Equals(name, previousName, StringComparison.OrdinalIgnoreCase)) ??
+            fallbackName ??
+            "";
     }
 
     private void ShowMessages(IEnumerable<string> warnings, ValidationSeverity summarySeverity, string summary)
@@ -1744,6 +1989,31 @@ public sealed class SectionPropertyViewModel : ObservableObject
             "SteelPipe" or "Pipe" => "Pipe",
             _ => "Rectangular"
         };
+    }
+
+    private bool IsSap2000SectionDesignerCircularTemplate()
+    {
+        return (SelectedSap2000SectionDesignerTemplate ?? "").Contains("Circular", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int ToSap2000SectionDesignerDesignType(string? value)
+    {
+        string normalized = new string((value ?? "").Where(char.IsLetterOrDigit).ToArray());
+        return normalized switch
+        {
+            "GeneralSteelDesign" => 1,
+            "ConcreteColumnCheckReinforcing" => 2,
+            "ConcreteColumnDesignReinforcing" => 3,
+            _ => 0
+        };
+    }
+
+    private static double PositiveMmToM(double value, string label)
+    {
+        if (!double.IsFinite(value) || value <= 0)
+            throw new InvalidOperationException($"{label} must be greater than zero.");
+
+        return MmToM(value);
     }
 
     private static string GetUniqueName(string baseName, IEnumerable<string> existingNames)

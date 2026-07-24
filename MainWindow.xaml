@@ -1900,6 +1900,7 @@
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="*"/>
                                         <RowDefinition Height="235"/>
+                                        <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                     <WrapPanel Grid.Row="0" Margin="0,0,0,8">
                                         <Button Content="New Frame Section"
@@ -1991,6 +1992,82 @@
                                                     Command="{Binding SaveFramePropertyCommand}"
                                                     HorizontalAlignment="Left"
                                                     Margin="8,0,0,0"/>
+                                        </Grid>
+                                    </GroupBox>
+                                    <GroupBox Grid.Row="3" Header="SAP2000 Section Designer CFT / CFST Creator" Margin="0,10,0,0">
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="125"/>
+                                                <ColumnDefinition Width="190"/>
+                                                <ColumnDefinition Width="115"/>
+                                                <ColumnDefinition Width="190"/>
+                                                <ColumnDefinition Width="115"/>
+                                                <ColumnDefinition Width="190"/>
+                                                <ColumnDefinition Width="*"/>
+                                            </Grid.ColumnDefinitions>
+                                            <Grid.RowDefinitions>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                                <RowDefinition Height="Auto"/>
+                                            </Grid.RowDefinitions>
+
+                                            <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="7"
+                                                       Text="SAP2000-only. Creates a Section Designer section from a steel tube/pipe shape plus concrete infill. Required materials must already exist in the connected SAP2000 model."
+                                                       Foreground="#475569"
+                                                       TextWrapping="Wrap"
+                                                       Margin="0,0,0,6"/>
+
+                                            <TextBlock Grid.Row="1" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Section name"/>
+                                            <TextBox Grid.Row="1" Grid.Column="1"
+                                                     Text="{Binding Sap2000SectionDesignerSectionName, UpdateSourceTrigger=PropertyChanged}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="2" Style="{StaticResource FieldLabel}" Text="Template"/>
+                                            <ComboBox Grid.Row="1" Grid.Column="3"
+                                                      ItemsSource="{Binding Sap2000SectionDesignerTemplates}"
+                                                      SelectedItem="{Binding SelectedSap2000SectionDesignerTemplate}"/>
+                                            <TextBlock Grid.Row="1" Grid.Column="4" Style="{StaticResource FieldLabel}" Text="Design type"/>
+                                            <ComboBox Grid.Row="1" Grid.Column="5"
+                                                      ItemsSource="{Binding Sap2000SectionDesignerDesignTypes}"
+                                                      SelectedItem="{Binding SelectedSap2000SectionDesignerDesignType}"/>
+
+                                            <TextBlock Grid.Row="2" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="Base material"/>
+                                            <ComboBox Grid.Row="2" Grid.Column="1"
+                                                      ItemsSource="{Binding MaterialNames}"
+                                                      SelectedItem="{Binding Sap2000SectionDesignerBaseMaterialName}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="2" Style="{StaticResource FieldLabel}" Text="Steel material"/>
+                                            <ComboBox Grid.Row="2" Grid.Column="3"
+                                                      ItemsSource="{Binding MaterialNames}"
+                                                      SelectedItem="{Binding Sap2000SectionDesignerSteelMaterialName}"/>
+                                            <TextBlock Grid.Row="2" Grid.Column="4" Style="{StaticResource FieldLabel}" Text="Concrete material"/>
+                                            <ComboBox Grid.Row="2" Grid.Column="5"
+                                                      ItemsSource="{Binding MaterialNames}"
+                                                      SelectedItem="{Binding Sap2000SectionDesignerConcreteMaterialName}"/>
+
+                                            <TextBlock Grid.Row="3" Grid.Column="0" Style="{StaticResource FieldLabel}" Text="{Binding Sap2000SectionDesignerPrimaryDimensionLabel}"/>
+                                            <TextBox Grid.Row="3" Grid.Column="1"
+                                                     Text="{Binding Sap2000SectionDesignerDepthMm, UpdateSourceTrigger=LostFocus, StringFormat=0.#}"/>
+                                            <TextBlock Grid.Row="3" Grid.Column="2" Style="{StaticResource FieldLabel}" Text="Outer width mm"
+                                                       Visibility="{Binding Sap2000SectionDesignerWidthVisibility}"/>
+                                            <TextBox Grid.Row="3" Grid.Column="3"
+                                                     Text="{Binding Sap2000SectionDesignerWidthMm, UpdateSourceTrigger=LostFocus, StringFormat=0.#}"
+                                                     Visibility="{Binding Sap2000SectionDesignerWidthVisibility}"/>
+                                            <TextBlock Grid.Row="3" Grid.Column="4" Style="{StaticResource FieldLabel}" Text="Wall thk mm"/>
+                                            <TextBox Grid.Row="3" Grid.Column="5"
+                                                     Text="{Binding Sap2000SectionDesignerWallThicknessMm, UpdateSourceTrigger=LostFocus, StringFormat=0.#}"/>
+
+                                            <Button Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2"
+                                                    Content="Create SAP2000 Section Designer Section"
+                                                    Command="{Binding CreateSap2000SectionDesignerCommand}"
+                                                    IsEnabled="{Binding IsSap2000SectionDesignerEditorEnabled}"
+                                                    HorizontalAlignment="Left"
+                                                    Margin="0,8,0,0"/>
+                                            <TextBlock Grid.Row="4" Grid.Column="2" Grid.ColumnSpan="5"
+                                                       Text="Tip: read SAP2000 properties first, then refresh after creation if needed. Existing section names are not overwritten."
+                                                       Foreground="#64748b"
+                                                       VerticalAlignment="Center"
+                                                       TextWrapping="Wrap"
+                                                       Margin="8,8,0,0"/>
                                         </Grid>
                                     </GroupBox>
                                 </Grid>

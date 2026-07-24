@@ -76,7 +76,7 @@ public sealed partial class Sap2000ModellingService
                 return new SectionPropertyUpdateResult
                 {
                     IsError = false,
-                    Message = $"SAP2000 Section Designer frame section '{propertyName}' was migrated with {section.Shapes.Count} shape(s).",
+                    Message = $"SAP2000 Section Designer frame section '{propertyName}' was created with {section.Shapes.Count} shape(s).",
                     Warnings = warnings
                 };
             }
