@@ -1813,6 +1813,12 @@ public sealed partial class Sap2000ModellingService
     private static List<string> GetFrameSectionNames(SAP2000v1.cSapModel sapModel, List<string> warnings)
     {
         var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        SAP2000v1.cPropFrame? propFrame = sapModel.PropFrame;
+        if (propFrame == null)
+        {
+            warnings.Add("SAP2000 did not expose the frame-property API. Check that this tool is using the matching SAP2000 API files from the local lib folder.");
+            return [];
+        }
 
         foreach (SAP2000v1.eFramePropType propType in Enum.GetValues(typeof(SAP2000v1.eFramePropType)).Cast<SAP2000v1.eFramePropType>())
         {
@@ -1820,7 +1826,7 @@ public sealed partial class Sap2000ModellingService
             string[] frameNames = [];
             try
             {
-                if (sapModel.PropFrame.GetNameList(ref numberNames, ref frameNames, propType) == 0)
+                if (propFrame.GetNameList(ref numberNames, ref frameNames, propType) == 0)
                 {
                     foreach (string name in frameNames.Take(Math.Min(numberNames, frameNames.Length)))
                     {
@@ -1844,6 +1850,12 @@ public sealed partial class Sap2000ModellingService
     private static List<string> GetMaterialNames(SAP2000v1.cSapModel sapModel, List<string> warnings)
     {
         var names = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        SAP2000v1.cPropMaterial? propMaterial = sapModel.PropMaterial;
+        if (propMaterial == null)
+        {
+            warnings.Add("SAP2000 did not expose the material-property API. Verify the SAP2000 API assembly and connection.");
+            return [];
+        }
 
         foreach (SAP2000v1.eMatType materialType in Enum.GetValues(typeof(SAP2000v1.eMatType)).Cast<SAP2000v1.eMatType>())
         {
@@ -1851,7 +1863,7 @@ public sealed partial class Sap2000ModellingService
             string[] materialNames = [];
             try
             {
-                if (sapModel.PropMaterial.GetNameList(ref numberNames, ref materialNames, materialType) == 0)
+                if (propMaterial.GetNameList(ref numberNames, ref materialNames, materialType) == 0)
                 {
                     foreach (string name in materialNames.Take(Math.Min(numberNames, materialNames.Length)))
                     {
@@ -1878,7 +1890,14 @@ public sealed partial class Sap2000ModellingService
         string[] names = [];
         try
         {
-            if (sapModel.PropCable.GetNameList(ref numberNames, ref names) == 0)
+            SAP2000v1.cPropCable? propCable = sapModel.PropCable;
+            if (propCable == null)
+            {
+                warnings.Add("SAP2000 did not expose the cable-property API. Verify the SAP2000 API assembly and connection.");
+                return [];
+            }
+
+            if (propCable.GetNameList(ref numberNames, ref names) == 0)
             {
                 return names
                     .Take(Math.Min(numberNames, names.Length))
@@ -1903,7 +1922,14 @@ public sealed partial class Sap2000ModellingService
         string[] names = [];
         try
         {
-            if (sapModel.PropTendon.GetNameList(ref numberNames, ref names) == 0)
+            SAP2000v1.cPropTendon? propTendon = sapModel.PropTendon;
+            if (propTendon == null)
+            {
+                warnings.Add("SAP2000 did not expose the tendon-property API. Verify the SAP2000 API assembly and connection.");
+                return [];
+            }
+
+            if (propTendon.GetNameList(ref numberNames, ref names) == 0)
             {
                 return names
                     .Take(Math.Min(numberNames, names.Length))
@@ -1928,7 +1954,14 @@ public sealed partial class Sap2000ModellingService
         string[] names = [];
         try
         {
-            if (sapModel.LoadPatterns.GetNameList(ref numberNames, ref names) == 0)
+            SAP2000v1.cLoadPatterns? loadPatterns = sapModel.LoadPatterns;
+            if (loadPatterns == null)
+            {
+                warnings.Add("SAP2000 did not expose the load-pattern API. Verify the SAP2000 API assembly and connection.");
+                return [];
+            }
+
+            if (loadPatterns.GetNameList(ref numberNames, ref names) == 0)
             {
                 return names
                     .Take(Math.Min(numberNames, names.Length))
@@ -2691,6 +2724,15 @@ public sealed partial class Sap2000ModellingService
             SAP2000v1.cSapModel sapModel = sapObject.SapModel;
             if (sapModel == null)
                 throw new InvalidOperationException("Connected to the SAP2000 API object, but SAP2000 did not return SapModel. Open a model in SAP2000 and make sure SAP2000 and this app are running under the same Windows user/elevation.");
+
+            try
+            {
+                _ = sapModel.GetPresentUnits();
+            }
+            catch (Exception ex)
+            {
+                throw new InvalidOperationException("Connected to SAP2000, but the selected SAP2000 model API is not readable. This usually means SAP2000 returned a stale/half-initialized API session. Close all SAP2000 windows, reopen the target model completely, then refresh instances. Make sure SAP2000 and this tool are running under the same Windows user/elevation. Details: " + ex.Message, ex);
+            }
 
             return sapModel;
         }

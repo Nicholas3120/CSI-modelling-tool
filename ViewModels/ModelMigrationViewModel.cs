@@ -760,6 +760,29 @@ public sealed class ModelMigrationViewModel : ObservableObject
         if (_sourceSnapshot == null || !_sourceSnapshot.TryGetFrame(itemName, out EtabsFramePropertyRow? frame) || frame == null)
             return MigrationApplyResult.Error("Source frame/member definition details were not found.");
 
+        if (_targetSnapshot?.Product == Sap2000Product)
+        {
+            List<string> missingMaterials = GetRequiredFrameMaterialNames(frame)
+                .Where(materialName => !_targetSnapshot.ContainsName(MigrationScopeDefinition.MaterialsKey, materialName))
+                .ToList();
+            if (missingMaterials.Count > 0)
+                return MigrationApplyResult.Error("Required material(s) are not in the To Model. Check/migrate these Materials first: " + string.Join(", ", missingMaterials) + ".");
+        }
+
+        if (frame.Sap2000SectionDesigner != null)
+        {
+            if (_sourceSnapshot.Product != Sap2000Product || _targetSnapshot?.Product != Sap2000Product)
+                return MigrationApplyResult.Error("SAP2000 Section Designer frame sections can currently be migrated only from SAP2000 to SAP2000.");
+
+            var sectionDesignerRequest = new Sap2000SectionDesignerFramePropertyUpdateRequest
+            {
+                Sap2000InstanceId = TargetSap2000InstanceId,
+                Section = frame.Sap2000SectionDesigner
+            };
+
+            return MigrationApplyResult.FromSectionResult(_sap2000Service.UpdateSectionDesignerFrameProperty(sectionDesignerRequest));
+        }
+
         if (frame.DepthMm <= 0)
             return MigrationApplyResult.Error("Source frame/member definition geometry was not available for this section type.");
 
@@ -1216,6 +1239,32 @@ public sealed class ModelMigrationViewModel : ObservableObject
     private static double EnsurePositiveOrDefault(double value, double defaultValue)
     {
         return double.IsFinite(value) && value > 0 ? value : defaultValue;
+    }
+
+    private static List<string> GetRequiredFrameMaterialNames(EtabsFramePropertyRow frame)
+    {
+        var materialNames = new SortedSet<string>(StringComparer.OrdinalIgnoreCase);
+        AddMaterialName(materialNames, frame.MaterialName);
+
+        Sap2000SectionDesignerFrameSection? sectionDesigner = frame.Sap2000SectionDesigner;
+        if (sectionDesigner != null)
+        {
+            AddMaterialName(materialNames, sectionDesigner.BaseMaterialName);
+            foreach (Sap2000SectionDesignerShape shape in sectionDesigner.Shapes)
+            {
+                AddMaterialName(materialNames, shape.MaterialName);
+                AddMaterialName(materialNames, shape.RebarMaterialName);
+            }
+        }
+
+        return materialNames.ToList();
+    }
+
+    private static void AddMaterialName(ISet<string> materialNames, string? materialName)
+    {
+        string trimmed = (materialName ?? "").Trim();
+        if (trimmed.Length > 0)
+            materialNames.Add(trimmed);
     }
 
     private sealed record MigrationApplyResult(bool IsError, bool IsSkipped, string Message, List<string> Warnings)

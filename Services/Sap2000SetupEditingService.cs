@@ -684,6 +684,10 @@ public sealed partial class Sap2000ModellingService
                 TryUnlockModelForDrawing(sapModel, warnings);
 
                 string shape = NormalizeCsiLabel(request.ShapeType);
+                EnsureSap2000MaterialsExist(sapModel, [materialName], $"frame section '{propertyName}'");
+                if (shape is "SectionDesigner" or "SD" or "FilledTube" or "FilledPipe" or "EncasedRectangle" or "EncasedCircle")
+                    throw new InvalidOperationException($"SAP2000 frame section '{propertyName}' is a complex '{request.ShapeType}' section and cannot be recreated by the simple frame-section path. Migrate it from a SAP2000 source as a Section Designer section, or define it in the target model first.");
+
                 int ret = shape switch
                 {
                     "ConcreteCircular" or "Circle" or "Circular" =>
@@ -1481,6 +1485,12 @@ public sealed partial class Sap2000ModellingService
                     // Imported or auto-select properties may not expose one simple material name.
                 }
 
+                Sap2000SectionDesignerFrameSection? sectionDesigner = propType == SAP2000v1.eFramePropType.SD
+                    ? TryReadSap2000SectionDesignerFrameSection(sapModel, name, warnings)
+                    : null;
+                if (string.IsNullOrWhiteSpace(materialName) && !string.IsNullOrWhiteSpace(sectionDesigner?.BaseMaterialName))
+                    materialName = sectionDesigner.BaseMaterialName;
+
                 (double Depth, double Width, double FlangeThickness, double WebThickness) dimensions = GetFrameSectionDimensions(sapModel, name, propType);
 
                 return new EtabsFramePropertyRow
@@ -1492,7 +1502,10 @@ public sealed partial class Sap2000ModellingService
                     WidthMm = dimensions.Width * 1000.0,
                     FlangeThicknessMm = dimensions.FlangeThickness * 1000.0,
                     WebThicknessMm = dimensions.WebThickness * 1000.0,
-                    SectionSummary = GetFrameSectionSummary(sapModel, name)
+                    SectionSummary = sectionDesigner == null
+                        ? GetFrameSectionSummary(sapModel, name)
+                        : FormatSap2000SectionDesignerSummary(sapModel, name, sectionDesigner),
+                    Sap2000SectionDesigner = sectionDesigner
                 };
             })
             .OrderBy(row => row.Name, StringComparer.OrdinalIgnoreCase)
@@ -1838,6 +1851,11 @@ public sealed partial class Sap2000ModellingService
             SAP2000v1.eFramePropType.Channel => "Steel Channel",
             SAP2000v1.eFramePropType.Box => "Steel Tube",
             SAP2000v1.eFramePropType.Pipe => "Steel Pipe",
+            SAP2000v1.eFramePropType.SD => "Section Designer",
+            SAP2000v1.eFramePropType.FilledTube => "Filled Tube",
+            SAP2000v1.eFramePropType.FilledPipe => "Filled Pipe",
+            SAP2000v1.eFramePropType.EncasedRectangle => "Encased Rectangle",
+            SAP2000v1.eFramePropType.EncasedCircle => "Encased Circle",
             _ => propType.ToString()
         };
     }

@@ -293,6 +293,74 @@ public sealed class EtabsFramePropertyRow
     public double WebThicknessMm { get; set; }
     public string SectionSummary { get; set; } = "";
     public bool IsPendingNew { get; set; }
+    public Sap2000SectionDesignerFrameSection? Sap2000SectionDesigner { get; set; }
+}
+
+public sealed class Sap2000SectionDesignerFramePropertyUpdateRequest
+{
+    public string? Sap2000InstanceId { get; set; }
+    public Sap2000SectionDesignerFrameSection Section { get; set; } = new();
+}
+
+public sealed class Sap2000SectionDesignerFrameSection
+{
+    public string Name { get; set; } = "";
+    public string BaseMaterialName { get; set; } = "";
+    public int DesignType { get; set; }
+    public int Color { get; set; } = -1;
+    public string Notes { get; set; } = "";
+    public string Guid { get; set; } = "";
+    public List<Sap2000SectionDesignerShape> Shapes { get; set; } = [];
+}
+
+public sealed class Sap2000SectionDesignerShape
+{
+    public int TypeCode { get; set; }
+    public string ShapeName { get; set; } = "";
+    public string MaterialName { get; set; } = "";
+    public string PropertyName { get; set; } = "";
+    public string StressStrainOverwrite { get; set; } = "";
+    public int Color { get; set; } = -1;
+    public string UnsupportedReason { get; set; } = "";
+
+    public double XCenter { get; set; }
+    public double YCenter { get; set; }
+    public double X1 { get; set; }
+    public double Y1 { get; set; }
+    public double X2 { get; set; }
+    public double Y2 { get; set; }
+    public double Height { get; set; }
+    public double Width { get; set; }
+    public double FlangeThickness { get; set; }
+    public double WebThickness { get; set; }
+    public double BottomFlangeWidth { get; set; }
+    public double BottomFlangeThickness { get; set; }
+    public double Distance { get; set; }
+    public double Rotation { get; set; }
+    public double Diameter { get; set; }
+    public double Thickness { get; set; }
+    public double Angle { get; set; }
+    public double Radius { get; set; }
+    public double Spacing { get; set; }
+    public double Cover { get; set; }
+
+    public int NumberPoints { get; set; }
+    public int NumberBars { get; set; }
+    public int PointNumber { get; set; }
+    public int EdgeNumber { get; set; }
+    public bool Reinforcement { get; set; }
+    public bool EndBars { get; set; }
+    public string RebarSize { get; set; } = "";
+    public string RebarMaterialName { get; set; } = "";
+
+    public List<double> XCoordinates { get; set; } = [];
+    public List<double> YCoordinates { get; set; } = [];
+    public List<double> CornerRadii { get; set; } = [];
+    public List<int> PointNumbers { get; set; } = [];
+    public List<int> EdgeNumbers { get; set; } = [];
+    public List<string> RebarSizes { get; set; } = [];
+    public List<double> Spacings { get; set; } = [];
+    public List<double> Covers { get; set; } = [];
 }
 
 public sealed class EtabsAreaPropertyRow

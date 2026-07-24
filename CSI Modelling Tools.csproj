@@ -32,8 +32,8 @@
       <SpecificVersion>false</SpecificVersion>
     </Reference>
     <None Include="lib\ETABSv1.dll" CopyToOutputDirectory="PreserveNewest" Visible="false" />
-    <None Include="lib\CSiAPIv1.*" CopyToOutputDirectory="PreserveNewest" Visible="false" />
-    <None Include="lib\SAP2000v1.*" CopyToOutputDirectory="PreserveNewest" Visible="false" />
+    <None Include="lib\CSiAPIv1.*" CopyToOutputDirectory="PreserveNewest" TargetPath="%(Filename)%(Extension)" Visible="false" />
+    <None Include="lib\SAP2000v1.*" CopyToOutputDirectory="PreserveNewest" TargetPath="%(Filename)%(Extension)" Visible="false" />
     <None Include="PropertyLibraries\*.xml" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
@@ -52,10 +52,10 @@
            Text="The .NET SDK was not detected. Install the .NET 8 SDK or later, then restore/build this project again." />
     <Error Condition="!Exists('$(MSBuildThisFileDirectory)lib\ETABSv1.dll')"
            Text="Missing lib\ETABSv1.dll. Copy the full project folder, including the lib folder, before building." />
-    <Error Condition="!Exists('$(MSBuildThisFileDirectory)lib\SAP2000v1.dll')"
-           Text="Missing lib\SAP2000v1.dll. Copy the full project folder, including the lib folder, before building." />
     <Error Condition="!Exists('$(MSBuildThisFileDirectory)lib\CSiAPIv1.dll')"
            Text="Missing lib\CSiAPIv1.dll. Copy the full project folder, including the lib folder, before building." />
+    <Error Condition="!Exists('$(MSBuildThisFileDirectory)lib\SAP2000v1.dll')"
+           Text="Missing lib\SAP2000v1.dll. Copy the full project folder, including the lib folder, before building." />
   </Target>
 
 </Project>
